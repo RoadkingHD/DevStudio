@@ -77,7 +77,7 @@ namespace DevStudio.Debugger
 
                     foreach (var point in points)
                     {
-                        if (point.StartLine <= 0 || point.Document.IsNil)
+                        if (point.StartLine <= 0 || point.StartLine >= 0xFEEFEE || point.Document.IsNil)
                         {
                             continue;
                         }

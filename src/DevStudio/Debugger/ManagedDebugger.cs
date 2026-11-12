@@ -60,6 +60,8 @@ namespace DevStudio.Debugger
         private int _processId;
         private IntPtr _processHandle = IntPtr.Zero;
         private CorDebugThread _stoppedThread;
+        private string _exePath;
+        private CorDebugModule _exeModule;
         private bool _stepping;
         private bool _stepIn;
         private string _stepFile;
@@ -146,6 +148,7 @@ namespace DevStudio.Debugger
             {
                 Output?.Invoke("Warning: no PDB found, breakpoints and source mapping will be unavailable.");
             }
+            _exePath = exePath;
             _map = new SequencePointMap(exePath);
 
             lock (_gate)
@@ -267,6 +270,7 @@ namespace DevStudio.Debugger
             _stopped = false;
             _stoppedThread = null;
             _stepping = false;
+            _exeModule = null;
             IsRunning = false;
             _steppers.Clear();
             _boundBreakpoints.Clear();
@@ -759,6 +763,13 @@ namespace DevStudio.Debugger
                         }
                     }
                     break;
+                case CorDebugManagedCallbackKind.BreakpointSetError:
+                    {
+                        var bse = (BreakpointSetErrorCorDebugManagedCallbackEventArgs)e;
+                        Output?.Invoke("Breakpoint could not be set in the debuggee (error " + bse.Error + ").");
+                        Resume(e);
+                    }
+                    break;
                 case CorDebugManagedCallbackKind.LogMessage:
                     Output?.Invoke("[log] " + ((LogMessageCorDebugManagedCallbackEventArgs)e).Message);
                     Resume(e);
@@ -875,11 +886,92 @@ namespace DevStudio.Debugger
             }
         }
 
+        public void AddBreakpoint(string file, int line)
+        {
+            try
+            {
+                RunSync(() =>
+                {
+                    lock (_gate)
+                    {
+                        if (_process == null || _map == null || _exeModule == null)
+                        {
+                            return;
+                        }
+                        var key = file + ":" + line;
+                        if (_boundBreakpoints.ContainsKey(key))
+                        {
+                            return;
+                        }
+                        BreakpointBinding binding;
+                        if (!_map.TryBind(file, line, out binding))
+                        {
+                            Output?.Invoke("Breakpoint will not be hit: " + Path.GetFileName(file) + ":" + line +
+                                " (no executable code found for this line)");
+                            return;
+                        }
+                        try
+                        {
+                            var function = _exeModule.GetFunctionFromToken(binding.MethodToken);
+                            var bp = function.ILCode.CreateBreakpoint(binding.ILOffset);
+                            List<BoundBp> list;
+                            if (!_boundBreakpoints.TryGetValue(key, out list))
+                            {
+                                list = new List<BoundBp>();
+                                _boundBreakpoints[key] = list;
+                            }
+                            list.Add(new BoundBp { Breakpoint = bp, ModulePath = _exePath, Token = binding.MethodToken, Offset = binding.ILOffset });
+                            Output?.Invoke("Breakpoint bound: " + Path.GetFileName(file) + ":" + line);
+                        }
+                        catch (Exception ex)
+                        {
+                            Output?.Invoke("Breakpoint could not be bound: " + Path.GetFileName(file) + ":" + line + " (" + ex.Message + ")");
+                        }
+                    }
+                });
+            }
+            catch
+            {
+            }
+        }
+
+        public void RemoveBreakpoint(string file, int line)
+        {
+            try
+            {
+                RunSync(() =>
+                {
+                    lock (_gate)
+                    {
+                        var key = file + ":" + line;
+                        List<BoundBp> list;
+                        if (_boundBreakpoints.TryGetValue(key, out list))
+                        {
+                            foreach (var bound in list)
+                            {
+                                try { bound.Breakpoint.Activate(false); } catch { }
+                            }
+                            _boundBreakpoints.Remove(key);
+                        }
+                    }
+                });
+            }
+            catch
+            {
+            }
+        }
+
         private void OnLoadModule(CorDebugAppDomain appDomain, CorDebugModule module)
         {
             try
             {
                 var modulePath = module.Name;
+                if (_exePath != null &&
+                    !string.Equals(Path.GetFileName(modulePath), Path.GetFileName(_exePath), StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+                _exeModule = module;
                 List<BreakpointSpec> toBind;
                 lock (_gate)
                 {
@@ -918,6 +1010,18 @@ namespace DevStudio.Debugger
                     catch
                     {
                     }
+                }
+
+                List<BreakpointSpec> unbound;
+                lock (_gate)
+                {
+                    unbound = _pendingBreakpoints.ToList();
+                }
+                foreach (var spec in unbound)
+                {
+                    Output?.Invoke("Breakpoint will not be hit: " + Path.GetFileName(spec.File) + ":" + spec.Line +
+                        " (no executable code was found for this line in " + Path.GetFileName(modulePath) + ")");
+                    _pendingBreakpoints.Remove(spec);
                 }
             }
             catch

@@ -144,11 +144,23 @@ namespace DevStudio.UI
             host.CaretMoved += UpdateCaretStatus;
             host.BreakpointToggled += (s, line) =>
             {
-                if (!doc.BreakpointLines.Remove(line))
+                bool added = !doc.BreakpointLines.Remove(line);
+                if (added)
                 {
                     doc.BreakpointLines.Add(line);
                 }
                 RefreshBreakpointsPanel();
+                if (_debugger.IsRunning)
+                {
+                    if (added)
+                    {
+                        _debugger.AddBreakpoint(doc.FilePath, line);
+                    }
+                    else
+                    {
+                        _debugger.RemoveBreakpoint(doc.FilePath, line);
+                    }
+                }
             };
             host.GoToDefinitionRequested += (s, e) => { var t = GoToDefinition(); };
             host.FindReferencesRequested += (s, e) => { var t = FindReferences(); };
