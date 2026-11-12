@@ -136,6 +136,7 @@ namespace DevStudio.Debugger
                 _pendingBreakpoints.Clear();
                 _boundBreakpoints.Clear();
                 _steppers.Clear();
+                _debuggerErrorCount = 0;
                 _pendingBreakpoints.AddRange(breakpoints ?? Enumerable.Empty<BreakpointSpec>());
 
                 RunSync(() =>
@@ -595,6 +596,107 @@ namespace DevStudio.Debugger
             }
         }
 
+        private int _debuggerErrorCount;
+
+        private void DispatchCallback(CorDebugManagedCallbackEventArgs e)
+        {
+            switch (e.Kind)
+            {
+                case CorDebugManagedCallbackKind.CreateProcess:
+                    Output?.Invoke("Debuggee process created.");
+                    Resume(e);
+                    break;
+                case CorDebugManagedCallbackKind.LoadModule:
+                    {
+                        var loadModule = (LoadModuleCorDebugManagedCallbackEventArgs)e;
+                        OnLoadModule(loadModule.AppDomain, loadModule.Module);
+                        Resume(e);
+                    }
+                    break;
+                case CorDebugManagedCallbackKind.Breakpoint:
+                    {
+                        var bp = (BreakpointCorDebugManagedCallbackEventArgs)e;
+                        e.Continue = false;
+                        OnBreakpointHit(bp.Breakpoint, bp.Thread);
+                    }
+                    break;
+                case CorDebugManagedCallbackKind.StepComplete:
+                    e.Continue = false;
+                    RaiseStop("Step complete", null, ((StepCompleteCorDebugManagedCallbackEventArgs)e).Thread);
+                    break;
+                case CorDebugManagedCallbackKind.Break:
+                    e.Continue = false;
+                    RaiseStop("Break", null, ((BreakCorDebugManagedCallbackEventArgs)e).Thread);
+                    break;
+                case CorDebugManagedCallbackKind.Exception:
+                    HandleException(e, ((ExceptionCorDebugManagedCallbackEventArgs)e).Unhandled != 0);
+                    break;
+                case CorDebugManagedCallbackKind.Exception2:
+                    HandleException(e, ((Exception2CorDebugManagedCallbackEventArgs)e).EventType == CorDebugExceptionCallbackType.DEBUG_EXCEPTION_UNHANDLED);
+                    break;
+                case CorDebugManagedCallbackKind.ExitProcess:
+                    e.Continue = true;
+                    IsRunning = false;
+                    Output?.Invoke("Debuggee process exited.");
+                    ProcessExited?.Invoke();
+                    break;
+                case CorDebugManagedCallbackKind.DebuggerError:
+                    {
+                        var error = (DebuggerErrorCorDebugManagedCallbackEventArgs)e;
+                        Output?.Invoke("Debugger error in debuggee: " + DescribeDebuggerError(error.ErrorHR));
+                        _debuggerErrorCount++;
+                        if (_debuggerErrorCount > 50)
+                        {
+                            Output?.Invoke("Too many debugger errors; terminating debuggee.");
+                            try { _process?.Terminate(1); } catch { }
+                            IsRunning = false;
+                            ProcessExited?.Invoke();
+                        }
+                        else
+                        {
+                            Resume(e);
+                        }
+                    }
+                    break;
+                case CorDebugManagedCallbackKind.LogMessage:
+                    Output?.Invoke("[log] " + ((LogMessageCorDebugManagedCallbackEventArgs)e).Message);
+                    Resume(e);
+                    break;
+                default:
+                    Resume(e);
+                    break;
+            }
+        }
+
+        private void HandleException(CorDebugManagedCallbackEventArgs e, bool unhandled)
+        {
+            if (unhandled)
+            {
+                e.Continue = false;
+                var thread = e is ExceptionCorDebugManagedCallbackEventArgs
+                    ? ((ExceptionCorDebugManagedCallbackEventArgs)e).Thread
+                    : ((Exception2CorDebugManagedCallbackEventArgs)e).Thread;
+                RaiseStop("Unhandled exception", "An unhandled exception occurred in the debuggee.", thread);
+            }
+            else
+            {
+                Output?.Invoke("First-chance exception in debuggee.");
+                Resume(e);
+            }
+        }
+
+        private void Resume(CorDebugManagedCallbackEventArgs e)
+        {
+            e.Continue = true;
+            try
+            {
+                e.Controller?.Continue(false);
+            }
+            catch
+            {
+            }
+        }
+
         private void OnLoadModule(CorDebugAppDomain appDomain, CorDebugModule module)
         {
             try
@@ -705,74 +807,9 @@ namespace DevStudio.Debugger
 
         private sealed class CallbackHandler : CorDebugManagedCallback
         {
-            private readonly ManagedDebugger _owner;
-
             public CallbackHandler(ManagedDebugger owner)
             {
-                _owner = owner;
-
-                OnCreateProcess += (s, e) =>
-                {
-                    _owner.Output?.Invoke("Debuggee process created.");
-                };
-
-                OnLoadModule += (s, e) =>
-                {
-                    e.Continue = true;
-                    _owner.OnLoadModule(e.AppDomain, e.Module);
-                };
-
-                OnBreakpoint += (s, e) =>
-                {
-                    e.Continue = false;
-                    _owner.OnBreakpointHit(e.Breakpoint, e.Thread);
-                };
-
-                OnStepComplete += (s, e) =>
-                {
-                    e.Continue = false;
-                    _owner.RaiseStop("Step complete", null, e.Thread);
-                };
-
-                OnBreak += (s, e) =>
-                {
-                    e.Continue = false;
-                    _owner.RaiseStop("Break", null, e.Thread);
-                };
-
-                OnException += (s, e) =>
-                {
-                    if (e.Unhandled != 0)
-                    {
-                        e.Continue = false;
-                        _owner.RaiseStop("Unhandled exception", "An unhandled exception occurred in the debuggee.", e.Thread);
-                    }
-                    else
-                    {
-                        e.Continue = true;
-                        _owner.Output?.Invoke("First-chance exception in debuggee.");
-                    }
-                };
-
-                OnExitProcess += (s, e) =>
-                {
-                    e.Continue = true;
-                    _owner.IsRunning = false;
-                    _owner.Output?.Invoke("Debuggee process exited.");
-                    _owner.ProcessExited?.Invoke();
-                };
-
-                OnDebuggerError += (s, e) =>
-                {
-                    e.Continue = true;
-                    _owner.Output?.Invoke("Debugger error in debuggee: " + DescribeDebuggerError(e.ErrorHR));
-                };
-
-                OnLogMessage += (s, e) =>
-                {
-                    e.Continue = true;
-                    _owner.Output?.Invoke("[log] " + e.Message);
-                };
+                OnAnyEvent += (s, e) => owner.DispatchCallback(e);
             }
         }
     }

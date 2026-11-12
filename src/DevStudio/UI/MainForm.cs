@@ -1108,9 +1108,12 @@ namespace DevStudio.UI
             solutionExplorer.ClearAll();
             WorkspaceManager.Instance.Reset();
             ClearDebugLines();
+            outputPanel.Clear();
+            errorListPanel.Clear();
+            findResultsPanel.Clear();
             callStackPanel.Clear();
+            breakpointsPanel.Clear();
             localsPanel.Clear();
-            breakpointsPanel.SetBreakpoints(new List<BreakpointsPanel.BreakpointEntry>());
             Text = "DevStudio";
             UpdateDebugUi();
         }

@@ -59,20 +59,25 @@ namespace DevStudio.Designer
             var surfacePanel = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
             surfacePanel.Controls.Add(_surface);
 
-            _split.Dock = DockStyle.Fill;
+            _split.Size = new Size(900, 400);
             _split.Orientation = Orientation.Vertical;
+            _split.FixedPanel = FixedPanel.Panel1;
             _split.Panel1.Controls.Add(toolboxPanel);
             _split.Panel2.Controls.Add(surfacePanel);
-            _split.SplitterDistance = 150;
+            _split.SplitterDistance = 160;
+            _split.Dock = DockStyle.Fill;
 
-            var rightSplit = new SplitContainer { Dock = DockStyle.Fill };
+            var rightSplit = new SplitContainer();
+            rightSplit.Size = new Size(1150, 400);
             rightSplit.Orientation = Orientation.Vertical;
+            rightSplit.FixedPanel = FixedPanel.Panel2;
             rightSplit.Panel1.Controls.Add(_split);
             rightSplit.Panel2.Controls.Add(_propertyGrid);
-            rightSplit.SplitterDistance = 600;
+            rightSplit.SplitterDistance = 900;
+            rightSplit.Dock = DockStyle.Fill;
 
-            Controls.Add(rightSplit);
             Controls.Add(_toolbar);
+            Controls.Add(rightSplit);
 
             _toolbar.Dock = DockStyle.Top;
             rightSplit.BringToFront();
