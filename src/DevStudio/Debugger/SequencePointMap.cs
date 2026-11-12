@@ -214,10 +214,6 @@ namespace DevStudio.Debugger
             line = 0;
             foreach (var kv in _ilToLine)
             {
-                if (!string.Equals(Path.GetFileName(kv.Key), Path.GetFileName(modulePath), StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
                 SortedList<int, int> offsets;
                 if (!kv.Value.TryGetValue(methodToken, out offsets))
                 {

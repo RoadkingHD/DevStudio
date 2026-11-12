@@ -57,6 +57,18 @@ namespace DevStudio.Debugger
         private readonly List<CorDebugStepper> _steppers = new List<CorDebugStepper>();
         private volatile bool _stopped;
         private int _stopCount;
+        private int _processId;
+        private IntPtr _processHandle = IntPtr.Zero;
+        private CorDebugThread _stoppedThread;
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool TerminateProcess(IntPtr hProcess, uint exitCode);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool CloseHandle(IntPtr hObject);
 
         public event Action<string> Output;
         public event Action<DebugStopInfo> Stopped;
@@ -165,8 +177,10 @@ namespace DevStudio.Debugger
 
                     _corDebug = corDebug;
                     _process = process;
-                    var pid = processInfo.dwProcessId;
-                    Output?.Invoke("Debugging started (PID " + pid + ").");
+                    _processId = (int)processInfo.dwProcessId;
+                    _processHandle = processInfo.hProcess;
+                    try { CloseHandle(processInfo.hThread); } catch { }
+                    Output?.Invoke("Debugging started (PID " + _processId + ").");
                 });
 
                 IsRunning = true;
@@ -177,6 +191,7 @@ namespace DevStudio.Debugger
 
         public void Stop()
         {
+            bool killed = false;
             try
             {
                 RunSync(() =>
@@ -187,14 +202,45 @@ namespace DevStudio.Debugger
                         {
                             if (_stopped)
                             {
-                                _process.Continue(false);
+                                try { _process.Continue(false); } catch { }
                                 _stopped = false;
                             }
                             try { _process.Terminate(0); } catch { }
+                            KillNative();
+                            EndSession();
+                            killed = true;
                         }
-                        EndSession();
                     }
                 });
+            }
+            catch
+            {
+            }
+            if (killed)
+            {
+                Output?.Invoke("Debugging stopped.");
+                ProcessExited?.Invoke();
+            }
+        }
+
+        private void KillNative()
+        {
+            try
+            {
+                if (_processHandle != IntPtr.Zero)
+                {
+                    TerminateProcess(_processHandle, 0);
+                    WaitForSingleObject(_processHandle, 3000);
+                    return;
+                }
+                if (_processId > 0)
+                {
+                    var proc = System.Diagnostics.Process.GetProcessById(_processId);
+                    if (!proc.HasExited)
+                    {
+                        proc.Kill();
+                    }
+                }
             }
             catch
             {
@@ -208,7 +254,13 @@ namespace DevStudio.Debugger
             try { _corDebug?.Terminate(); } catch { }
             _corDebug = null;
             _process = null;
+            if (_processHandle != IntPtr.Zero)
+            {
+                try { CloseHandle(_processHandle); } catch { }
+                _processHandle = IntPtr.Zero;
+            }
             _stopped = false;
+            _stoppedThread = null;
             IsRunning = false;
             _steppers.Clear();
             _boundBreakpoints.Clear();
@@ -234,6 +286,7 @@ namespace DevStudio.Debugger
                         _steppers.Clear();
                         _stopped = false;
                         _stopCount++;
+                        _stoppedThread = null;
                         try
                         {
                             _process.Continue(false);
@@ -262,7 +315,7 @@ namespace DevStudio.Debugger
                         {
                             return;
                         }
-                        var thread = FindStoppedThread();
+                        var thread = _stoppedThread ?? FindStoppedThread();
                         if (thread == null)
                         {
                             return;
@@ -308,7 +361,7 @@ namespace DevStudio.Debugger
                         {
                             return;
                         }
-                        var thread = FindStoppedThread();
+                        var thread = _stoppedThread ?? FindStoppedThread();
                         if (thread == null)
                         {
                             return;
@@ -346,6 +399,7 @@ namespace DevStudio.Debugger
                     return info;
                 }
                 info.ThreadId = thread.Id;
+                _stoppedThread = thread;
                 var chain = thread.ActiveChain;
                 if (chain == null)
                 {

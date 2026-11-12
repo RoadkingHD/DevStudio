@@ -236,7 +236,7 @@ namespace DevStudio.Editor
             _semanticFieldStyle = new TextStyle(BrushOf(theme.FieldName), null, FontStyle.Regular);
             _semanticVariableStyle = new TextStyle(BrushOf(theme.VariableName), null, FontStyle.Regular);
 
-            _debugStyle = new TextStyle(null, new SolidBrush(Color.FromArgb(80, theme.CurrentStatement)), FontStyle.Regular);
+            _debugStyle = new TextStyle(null, new SolidBrush(DebugHighlightColor(theme)), FontStyle.Bold);
 
             _minimap.BackColor = theme.Background;
             _minimap.ForeColor = theme.Foreground;
@@ -248,6 +248,15 @@ namespace DevStudio.Editor
         private static SolidBrush BrushOf(Color color)
         {
             return new SolidBrush(color);
+        }
+
+        private static Color DebugHighlightColor(EditorTheme theme)
+        {
+            double amount = theme.IsDark ? 0.6 : 0.45;
+            return Color.FromArgb(
+                (int)Math.Round(theme.CurrentStatement.R * amount + theme.Background.R * (1 - amount)),
+                (int)Math.Round(theme.CurrentStatement.G * amount + theme.Background.G * (1 - amount)),
+                (int)Math.Round(theme.CurrentStatement.B * amount + theme.Background.B * (1 - amount)));
         }
 
         public void SetDebugLine(int line)
@@ -376,7 +385,7 @@ namespace DevStudio.Editor
                 {
                     int newline = info.IndexOf('\n');
                     e.ToolTipTitle = newline > 0 ? info.Substring(0, newline).Trim() : info.Trim();
-                    e.ToolTipText = info;
+                    e.ToolTipText = newline > 0 ? info.Substring(newline + 1).Trim() : null;
                     e.ToolTipIcon = ToolTipIcon.None;
                 }
             }
