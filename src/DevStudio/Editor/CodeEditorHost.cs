@@ -511,7 +511,7 @@ namespace DevStudio.Editor
 
         protected override Size MeasureOverride(Size availableSize)
         {
-            return new Size(Width, 0);
+            return new Size(CircleWidth, 0);
         }
 
         protected override void OnRender(DrawingContext dc)
