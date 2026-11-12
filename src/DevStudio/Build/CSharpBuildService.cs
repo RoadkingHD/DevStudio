@@ -64,6 +64,10 @@ namespace DevStudio.Build
             var references = WorkspaceManager.GetFrameworkReferences();
             foreach (var reference in project.References)
             {
+                if (reference.IsFramework)
+                {
+                    continue;
+                }
                 try
                 {
                     var path = reference.Resolve(project.ProjectDirectory);

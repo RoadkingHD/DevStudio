@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Media;
 using DevStudio.Services;
@@ -9,18 +10,23 @@ using ICSharpCode.AvalonEdit.Document;
 using ICSharpCode.AvalonEdit.Rendering;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Classification;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Text;
 
 namespace DevStudio.Editor
 {
-    /// <summary>Syntax colorizer driven by Roslyn classified spans.</summary>
+    /// <summary>Syntax colorizer driven by Roslyn classified spans, with an instant
+    /// token-based syntactic layer so the whole file is always colored.</summary>
     public sealed class RoslynColorizer : IVisualLineTransformer
     {
         private readonly EditorDocument _doc;
         private EditorTheme _theme;
-        private List<ClassifiedSpan> _cache;
-        private ITextSourceVersion _cachedVersion;
+        private System.Drawing.Color?[] _syntacticColors;
+        private ITextSourceVersion _syntacticVersion;
+        private System.Drawing.Color?[] _semanticColors;
+        private ITextSourceVersion _semanticVersion;
         private bool _computing;
+        private int _retries;
         private readonly object _gate = new object();
 
         public event EventHandler ClassificationChanged;
@@ -41,8 +47,10 @@ namespace DevStudio.Editor
         {
             lock (_gate)
             {
-                _cache = null;
-                _cachedVersion = null;
+                _syntacticColors = null;
+                _syntacticVersion = null;
+                _semanticColors = null;
+                _semanticVersion = null;
             }
         }
 
@@ -59,15 +67,18 @@ namespace DevStudio.Editor
                 return;
             }
 
-            if (!EnsureCache(version))
-            {
-                return;
-            }
+            EnsureSyntactic(version, context.Document.Text);
+            EnsureSemantic(version);
 
-            var spans = _cache;
-            if (spans == null)
+            System.Drawing.Color?[] semantic = null;
+            System.Drawing.Color?[] syntactic;
+            lock (_gate)
             {
-                return;
+                if (_semanticVersion == version)
+                {
+                    semantic = _semanticColors;
+                }
+                syntactic = _syntacticColors;
             }
 
             var lineStart = context.VisualLine.FirstDocumentLine.Offset;
@@ -76,58 +87,235 @@ namespace DevStudio.Editor
             foreach (var element in elements)
             {
                 var offset = lineStart + element.RelativeTextOffset;
-                if (offset < lineEnd)
+                if (offset >= lineEnd)
                 {
-                    var color = GetColorFor(spans, offset);
-                    if (color != null)
-                    {
-                        var brush = new SolidColorBrush(color.Value.ToMedia());
-                        brush.Freeze();
-                        element.TextRunProperties.SetForegroundBrush(brush);
-                    }
+                    continue;
+                }
+                System.Drawing.Color? color = null;
+                if (semantic != null && offset < semantic.Length)
+                {
+                    color = semantic[offset];
+                }
+                if (color == null && syntactic != null && offset < syntactic.Length)
+                {
+                    color = syntactic[offset];
+                }
+                if (color != null)
+                {
+                    var brush = new SolidColorBrush(color.Value.ToMedia());
+                    brush.Freeze();
+                    element.TextRunProperties.SetForegroundBrush(brush);
                 }
             }
         }
 
-        private bool EnsureCache(ITextSourceVersion version)
+        private void EnsureSyntactic(ITextSourceVersion version, string text)
         {
             lock (_gate)
             {
-                if (_cache != null && _cachedVersion == version)
+                if (_syntacticColors != null && _syntacticVersion == version)
                 {
-                    return true;
+                    return;
                 }
             }
-
-            if (_computing)
+            var colors = BuildSyntacticColors(text);
+            lock (_gate)
             {
-                return _cache != null && _cachedVersion == version;
+                _syntacticColors = colors;
+                _syntacticVersion = version;
+            }
+        }
+
+        private System.Drawing.Color?[] BuildSyntacticColors(string text)
+        {
+            var colors = new System.Drawing.Color?[text == null ? 0 : text.Length];
+            if (string.IsNullOrEmpty(text))
+            {
+                return colors;
+            }
+            try
+            {
+                var tree = CSharpSyntaxTree.ParseText(text, new CSharpParseOptions(LanguageVersion.CSharp7_3));
+                foreach (var token in tree.GetCompilationUnitRoot().DescendantTokens())
+                {
+                    var color = MapToken(token.Kind());
+                    if (color != null)
+                    {
+                        Fill(colors, token.Span, color.Value);
+                    }
+                    foreach (var trivia in token.LeadingTrivia)
+                    {
+                        FillTrivia(colors, trivia);
+                    }
+                    foreach (var trivia in token.TrailingTrivia)
+                    {
+                        FillTrivia(colors, trivia);
+                    }
+                }
+            }
+            catch
+            {
+            }
+            return colors;
+        }
+
+        private void FillTrivia(System.Drawing.Color?[] colors, SyntaxTrivia trivia)
+        {
+            var kind = trivia.Kind();
+            if (kind == SyntaxKind.SingleLineCommentTrivia ||
+                kind == SyntaxKind.MultiLineCommentTrivia ||
+                kind == SyntaxKind.SingleLineDocumentationCommentTrivia ||
+                kind == SyntaxKind.MultiLineDocumentationCommentTrivia)
+            {
+                Fill(colors, trivia.Span, _theme.Comment);
+            }
+        }
+
+        private void Fill(System.Drawing.Color?[] colors, TextSpan span, System.Drawing.Color color)
+        {
+            var start = Math.Max(0, span.Start);
+            var end = Math.Min(colors.Length, span.End);
+            for (var i = start; i < end; i++)
+            {
+                colors[i] = color;
+            }
+        }
+
+        private System.Drawing.Color? MapToken(SyntaxKind kind)
+        {
+            if (kind == SyntaxKind.CharacterLiteralToken ||
+                kind.ToString().IndexOf("StringLiteral", StringComparison.Ordinal) >= 0 ||
+                kind.ToString().IndexOf("InterpolatedString", StringComparison.Ordinal) >= 0)
+            {
+                return _theme.String;
+            }
+            if (kind == SyntaxKind.NumericLiteralToken)
+            {
+                return _theme.Number;
+            }
+            if (SyntaxFacts.IsKeywordKind(kind))
+            {
+                return IsControlKeyword(kind) ? _theme.ControlKeyword : _theme.Keyword;
+            }
+            if (SyntaxFacts.IsPunctuation(kind))
+            {
+                return _theme.Punctuation;
+            }
+            if (IsOperatorToken(kind))
+            {
+                return _theme.Operator;
+            }
+            return null;
+        }
+
+        private static bool IsControlKeyword(SyntaxKind kind)
+        {
+            switch (kind)
+            {
+                case SyntaxKind.IfKeyword:
+                case SyntaxKind.ElseKeyword:
+                case SyntaxKind.ForKeyword:
+                case SyntaxKind.ForEachKeyword:
+                case SyntaxKind.WhileKeyword:
+                case SyntaxKind.DoKeyword:
+                case SyntaxKind.SwitchKeyword:
+                case SyntaxKind.ReturnKeyword:
+                case SyntaxKind.BreakKeyword:
+                case SyntaxKind.ContinueKeyword:
+                case SyntaxKind.ThrowKeyword:
+                case SyntaxKind.TryKeyword:
+                case SyntaxKind.CatchKeyword:
+                case SyntaxKind.FinallyKeyword:
+                case SyntaxKind.GotoKeyword:
+                case SyntaxKind.LockKeyword:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static bool IsOperatorToken(SyntaxKind kind)
+        {
+            var name = kind.ToString();
+            if (!name.EndsWith("Token", StringComparison.Ordinal) || name.Contains("Literal"))
+            {
+                return false;
+            }
+            return !SyntaxFacts.IsKeywordKind(kind) &&
+                   !SyntaxFacts.IsPunctuation(kind) &&
+                   !name.StartsWith("Identifier", StringComparison.Ordinal) &&
+                   !name.StartsWith("Contextual", StringComparison.Ordinal) &&
+                   !name.StartsWith("Omitted", StringComparison.Ordinal) &&
+                   !name.StartsWith("Eof", StringComparison.Ordinal) &&
+                   !name.StartsWith("Xml", StringComparison.Ordinal) &&
+                   !name.StartsWith("EndOfDirective", StringComparison.Ordinal) &&
+                   !name.StartsWith("Hash", StringComparison.Ordinal) &&
+                   !name.StartsWith("Interpolated", StringComparison.Ordinal) &&
+                   !name.StartsWith("SingleLine", StringComparison.Ordinal) &&
+                   !name.StartsWith("MultiLine", StringComparison.Ordinal) &&
+                   !name.StartsWith("Documentation", StringComparison.Ordinal) &&
+                   !name.StartsWith("Xml", StringComparison.Ordinal);
+        }
+
+        private void EnsureSemantic(ITextSourceVersion version)
+        {
+            lock (_gate)
+            {
+                if (_semanticColors != null && _semanticVersion == version)
+                {
+                    return;
+                }
+                if (_computing)
+                {
+                    return;
+                }
+                _computing = true;
             }
 
-            _computing = true;
-            var requestedVersion = version;
             var document = WorkspaceManager.Instance.GetDocument(_doc.FilePath);
             if (document == null)
             {
-                _computing = false;
-                return false;
+                lock (_gate)
+                {
+                    _computing = false;
+                }
+                ScheduleSemanticRetry();
+                return;
             }
 
+            var requestedVersion = version;
             Task.Run(async () =>
             {
                 try
                 {
-                    var model = await document.GetSemanticModelAsync();
+                    var model = await document.GetSemanticModelAsync().ConfigureAwait(false);
                     if (model != null)
                     {
-                        var spans = Classifier.GetClassifiedSpans(
-                            model,
+                        var spans = await Classifier.GetClassifiedSpansAsync(
+                            document,
                             new TextSpan(0, model.SyntaxTree.Length),
-                            document.Project.Solution.Workspace).ToList();
+                            CancellationToken.None).ConfigureAwait(false);
+                        var list = spans.ToList();
+                        var colors = new System.Drawing.Color?[_doc.Text.TextLength];
+                        foreach (var span in list)
+                        {
+                            if (span.ClassificationType == "identifier")
+                            {
+                                Fill(colors, span.TextSpan, MapColor(span.ClassificationType));
+                            }
+                        }
+                        foreach (var span in list)
+                        {
+                            if (span.ClassificationType != "identifier")
+                            {
+                                Fill(colors, span.TextSpan, MapColor(span.ClassificationType));
+                            }
+                        }
                         lock (_gate)
                         {
-                            _cache = spans;
-                            _cachedVersion = requestedVersion;
+                            _semanticColors = colors;
+                            _semanticVersion = requestedVersion;
+                            _retries = 0;
                         }
                     }
                 }
@@ -136,45 +324,28 @@ namespace DevStudio.Editor
                 }
                 finally
                 {
-                    _computing = false;
+                    lock (_gate)
+                    {
+                        _computing = false;
+                    }
                 }
-
                 ClassificationChanged?.Invoke(null, EventArgs.Empty);
             });
-
-            return false;
         }
 
-        private System.Drawing.Color? GetColorFor(List<ClassifiedSpan> spans, int offset)
+        private void ScheduleSemanticRetry()
         {
-            int lo = 0, hi = spans.Count - 1;
-            int found = -1;
-            while (lo <= hi)
+            if (Interlocked.Increment(ref _retries) > 40)
             {
-                var mid = (lo + hi) / 2;
-                var span = spans[mid].TextSpan;
-                if (offset < span.Start)
-                {
-                    hi = mid - 1;
-                }
-                else if (offset >= span.End)
-                {
-                    lo = mid + 1;
-                }
-                else
-                {
-                    found = mid;
-                    break;
-                }
+                return;
             }
-            if (found < 0)
+            Task.Delay(250).ContinueWith(t =>
             {
-                return null;
-            }
-            return MapColor(spans[found].ClassificationType);
+                ClassificationChanged?.Invoke(null, EventArgs.Empty);
+            });
         }
 
-        private System.Drawing.Color? MapColor(string classificationType)
+        private System.Drawing.Color MapColor(string classificationType)
         {
             var t = _theme;
             switch (classificationType)

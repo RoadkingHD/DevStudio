@@ -137,7 +137,6 @@ namespace DevStudio.Theming
             foreach (ToolStripItem item in items)
             {
                 item.ForeColor = Text;
-                item.BackColor = Color.Transparent;
                 var dropDown = item as ToolStripDropDownItem;
                 if (dropDown != null)
                 {

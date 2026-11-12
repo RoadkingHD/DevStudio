@@ -231,6 +231,10 @@ namespace DevStudio.Services
             var list = GetFrameworkReferences();
             foreach (var reference in project.References)
             {
+                if (reference.IsFramework)
+                {
+                    continue;
+                }
                 try
                 {
                     var path = reference.Resolve(project.ProjectDirectory);

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -45,6 +46,8 @@ namespace DevStudio.Debugger
     public sealed class ManagedDebugger : IDisposable
     {
         private readonly object _gate = new object();
+        private BlockingCollection<Action> _queue;
+        private Thread _debugThread;
         private CorDebug _corDebug;
         private CorDebugProcess _process;
         private CallbackHandler _handler;
@@ -64,6 +67,54 @@ namespace DevStudio.Debugger
         public bool IsStopped
         {
             get { return _stopped; }
+        }
+
+        private void EnsureDebuggerThread()
+        {
+            if (_debugThread != null)
+            {
+                return;
+            }
+            _queue = new BlockingCollection<Action>();
+            _debugThread = new Thread(() =>
+            {
+                foreach (var action in _queue.GetConsumingEnumerable())
+                {
+                    action();
+                }
+            });
+            _debugThread.SetApartmentState(ApartmentState.MTA);
+            _debugThread.IsBackground = true;
+            _debugThread.Start();
+        }
+
+        private void RunSync(Action action)
+        {
+            EnsureDebuggerThread();
+            Exception error = null;
+            using (var done = new ManualResetEventSlim(false))
+            {
+                _queue.Add(() =>
+                {
+                    try
+                    {
+                        action();
+                    }
+                    catch (Exception ex)
+                    {
+                        error = ex;
+                    }
+                    finally
+                    {
+                        done.Set();
+                    }
+                });
+                done.Wait();
+            }
+            if (error != null)
+            {
+                throw new InvalidOperationException(error.Message, error);
+            }
         }
 
         public void Start(string exePath, IEnumerable<BreakpointSpec> breakpoints)
@@ -87,32 +138,39 @@ namespace DevStudio.Debugger
                 _steppers.Clear();
                 _pendingBreakpoints.AddRange(breakpoints ?? Enumerable.Empty<BreakpointSpec>());
 
-                _corDebug = new CorDebug();
-                _corDebug.Initialize();
-                _handler = new CallbackHandler(this);
-                _corDebug.SetManagedHandler(_handler);
+                RunSync(() =>
+                {
+                    var corDebug = new CorDebug();
+                    corDebug.Initialize();
+                    _handler = new CallbackHandler(this);
+                    corDebug.SetManagedHandler(_handler);
 
-                var startupInfo = default(STARTUPINFOW);
-                startupInfo.cb = Marshal.SizeOf(typeof(STARTUPINFOW));
+                    var startupInfo = default(STARTUPINFOW);
+                    startupInfo.cb = Marshal.SizeOf(typeof(STARTUPINFOW));
 
-                var processInfo = new PROCESS_INFORMATION();
-                _process = _corDebug.CreateProcess(
-                    exePath,
-                    "\"" + exePath + "\"",
-                    default(SECURITY_ATTRIBUTES),
-                    default(SECURITY_ATTRIBUTES),
-                    false,
-                    CreateProcessFlags.DEBUG_ONLY_THIS_PROCESS,
-                    IntPtr.Zero,
-                    Path.GetDirectoryName(exePath),
-                    startupInfo,
-                    ref processInfo,
-                    CorDebugCreateProcessFlags.DEBUG_NO_SPECIAL_OPTIONS);
+                    var processInfo = new PROCESS_INFORMATION();
+                    var process = corDebug.CreateProcess(
+                        exePath,
+                        "\"" + exePath + "\"",
+                        default(SECURITY_ATTRIBUTES),
+                        default(SECURITY_ATTRIBUTES),
+                        false,
+                        CreateProcessFlags.DEBUG_ONLY_THIS_PROCESS,
+                        IntPtr.Zero,
+                        Path.GetDirectoryName(exePath),
+                        startupInfo,
+                        ref processInfo,
+                        CorDebugCreateProcessFlags.DEBUG_NO_SPECIAL_OPTIONS);
+
+                    _corDebug = corDebug;
+                    _process = process;
+                    var pid = processInfo.dwProcessId;
+                    Output?.Invoke("Debugging started (PID " + pid + ").");
+                });
 
                 IsRunning = true;
                 _stopped = false;
                 _stopCount = 0;
-                Output?.Invoke("Debugging started (PID " + processInfo.dwProcessId + ").");
             }
         }
 
@@ -120,15 +178,21 @@ namespace DevStudio.Debugger
         {
             try
             {
-                if (_process != null)
+                RunSync(() =>
                 {
-                    if (_stopped)
+                    lock (_gate)
                     {
-                        _process.Continue(false);
-                        _stopped = false;
+                        if (_process != null)
+                        {
+                            if (_stopped)
+                            {
+                                _process.Continue(false);
+                                _stopped = false;
+                            }
+                            _process.Terminate(0);
+                        }
                     }
-                    _process.Terminate(0);
-                }
+                });
             }
             catch
             {
@@ -137,94 +201,121 @@ namespace DevStudio.Debugger
 
         public void Continue()
         {
-            lock (_gate)
+            try
             {
-                if (_process == null || !_stopped)
+                RunSync(() =>
                 {
-                    return;
-                }
-                foreach (var stepper in _steppers)
-                {
-                    try { stepper.Deactivate(); } catch { }
-                }
-                _steppers.Clear();
-                _stopped = false;
-                _stopCount++;
-                try
-                {
-                    _process.Continue(false);
-                }
-                catch
-                {
-                }
-                Resumed?.Invoke();
+                    lock (_gate)
+                    {
+                        if (_process == null || !_stopped)
+                        {
+                            return;
+                        }
+                        foreach (var stepper in _steppers)
+                        {
+                            try { stepper.Deactivate(); } catch { }
+                        }
+                        _steppers.Clear();
+                        _stopped = false;
+                        _stopCount++;
+                        try
+                        {
+                            _process.Continue(false);
+                        }
+                        catch
+                        {
+                        }
+                        Resumed?.Invoke();
+                    }
+                });
+            }
+            catch
+            {
             }
         }
 
         public void Step(bool stepIn)
         {
-            lock (_gate)
+            try
             {
-                if (_process == null || !_stopped)
+                RunSync(() =>
                 {
-                    return;
-                }
-                var thread = FindStoppedThread();
-                if (thread == null)
-                {
-                    return;
-                }
-                foreach (var stepper in _steppers)
-                {
-                    try { stepper.Deactivate(); } catch { }
-                }
-                _steppers.Clear();
-                try
-                {
-                    var stepper = thread.CreateStepper();
-                    stepper.SetUnmappedStopMask(CorDebugUnmappedStop.STOP_NONE);
-                    stepper.SetInterceptMask(CorDebugIntercept.INTERCEPT_NONE);
-                    stepper.Step(stepIn);
-                    _steppers.Add(stepper);
-                    _stopped = false;
-                    _stopCount++;
-                    _process.Continue(false);
-                    Resumed?.Invoke();
-                }
-                catch (Exception ex)
-                {
-                    Output?.Invoke("Step failed: " + ex.Message);
-                }
+                    lock (_gate)
+                    {
+                        if (_process == null || !_stopped)
+                        {
+                            return;
+                        }
+                        var thread = FindStoppedThread();
+                        if (thread == null)
+                        {
+                            return;
+                        }
+                        foreach (var stepper in _steppers)
+                        {
+                            try { stepper.Deactivate(); } catch { }
+                        }
+                        _steppers.Clear();
+                        try
+                        {
+                            var stepper = thread.CreateStepper();
+                            stepper.SetUnmappedStopMask(CorDebugUnmappedStop.STOP_NONE);
+                            stepper.SetInterceptMask(CorDebugIntercept.INTERCEPT_NONE);
+                            stepper.Step(stepIn);
+                            _steppers.Add(stepper);
+                            _stopped = false;
+                            _stopCount++;
+                            _process.Continue(false);
+                            Resumed?.Invoke();
+                        }
+                        catch (Exception ex)
+                        {
+                            Output?.Invoke("Step failed: " + ex.Message);
+                        }
+                    }
+                });
+            }
+            catch
+            {
             }
         }
 
         public void StepOut()
         {
-            lock (_gate)
+            try
             {
-                if (_process == null || !_stopped)
+                RunSync(() =>
                 {
-                    return;
-                }
-                var thread = FindStoppedThread();
-                if (thread == null)
-                {
-                    return;
-                }
-                try
-                {
-                    var stepper = thread.CreateStepper();
-                    stepper.StepOut();
-                    _steppers.Add(stepper);
-                    _stopped = false;
-                    _stopCount++;
-                    _process.Continue(false);
-                    Resumed?.Invoke();
-                }
-                catch (Exception ex)
-                {
-                    Output?.Invoke("Step out failed: " + ex.Message);
-                }
+                    lock (_gate)
+                    {
+                        if (_process == null || !_stopped)
+                        {
+                            return;
+                        }
+                        var thread = FindStoppedThread();
+                        if (thread == null)
+                        {
+                            return;
+                        }
+                        try
+                        {
+                            var stepper = thread.CreateStepper();
+                            stepper.StepOut();
+                            _steppers.Add(stepper);
+                            _stopped = false;
+                            _stopCount++;
+                            _process.Continue(false);
+                            Resumed?.Invoke();
+                        }
+                        catch (Exception ex)
+                        {
+                            Output?.Invoke("Step out failed: " + ex.Message);
+                        }
+                    }
+                });
+            }
+            catch
+            {
             }
         }
 

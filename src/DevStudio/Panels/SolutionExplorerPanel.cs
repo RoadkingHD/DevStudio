@@ -22,6 +22,17 @@ namespace DevStudio.Panels
         public SolutionExplorerPanel()
         {
             InitializeComponent();
+            projectTree.MouseDown += (s, e) =>
+            {
+                if (e.Button == MouseButtons.Right)
+                {
+                    var node = projectTree.GetNodeAt(e.X, e.Y);
+                    if (node != null)
+                    {
+                        projectTree.SelectedNode = node;
+                    }
+                }
+            };
             BuildContextMenu();
         }
 
