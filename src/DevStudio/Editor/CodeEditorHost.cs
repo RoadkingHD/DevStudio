@@ -53,6 +53,8 @@ namespace DevStudio.Editor
         public event EventHandler FindReferencesRequested;
         public event EventHandler FindRequested;
 
+        public Func<string, string> DebugValueResolver { get; set; }
+
         public EditorDocument Document
         {
             get { return _document; }
@@ -369,6 +371,23 @@ namespace DevStudio.Editor
                 var place = _tb.PointToPlace(new Point(_tb.LeftIndent, e.Y));
                 BreakpointToggled?.Invoke(this, place.iLine + 1);
             }
+            else if (e.Button == MouseButtons.Right)
+            {
+                var place = _tb.PointToPlace(e.Location);
+                var start = _tb.Selection.Start;
+                var end = _tb.Selection.End;
+                bool insideSelection = !_tb.Selection.IsEmpty &&
+                    place.iLine >= Math.Min(start.iLine, end.iLine) &&
+                    place.iLine <= Math.Max(start.iLine, end.iLine);
+                if (!insideSelection)
+                {
+                    _tb.Selection.BeginUpdate();
+                    _tb.Selection.Start = place;
+                    _tb.Selection.End = place;
+                    _tb.Selection.EndUpdate();
+                    CaretMoved?.Invoke(this, EventArgs.Empty);
+                }
+            }
         }
 
         private void OnToolTipNeeded(object sender, ToolTipNeededEventArgs e)
@@ -381,6 +400,19 @@ namespace DevStudio.Editor
             {
                 int offset = _tb.PlaceToPosition(e.Place);
                 var info = Task.Run(() => _quickInfo.GetQuickInfoAsync(_document, offset)).GetAwaiter().GetResult();
+                string debugValue = null;
+                var resolver = DebugValueResolver;
+                if (resolver != null)
+                {
+                    try { debugValue = resolver(e.HoveredWord); } catch { }
+                }
+                if (debugValue != null)
+                {
+                    e.ToolTipTitle = e.HoveredWord + " = " + debugValue;
+                    e.ToolTipText = info;
+                    e.ToolTipIcon = ToolTipIcon.None;
+                    return;
+                }
                 if (!string.IsNullOrEmpty(info))
                 {
                     int newline = info.IndexOf('\n');

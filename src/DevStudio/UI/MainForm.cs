@@ -33,6 +33,7 @@ namespace DevStudio.UI
         private readonly Dictionary<string, EditorTab> _tabsByPath = new Dictionary<string, EditorTab>(StringComparer.OrdinalIgnoreCase);
         private readonly List<ProjectBase> _projects = new List<ProjectBase>();
         private readonly ManagedDebugger _debugger = new ManagedDebugger();
+        private DebugStopInfo _lastStopInfo;
         private readonly NavigationService _navigation = new NavigationService();
         private readonly CSharpBuildService _csharpBuilder;
         private readonly CppBuildService _cppBuilder;
@@ -152,6 +153,7 @@ namespace DevStudio.UI
             host.GoToDefinitionRequested += (s, e) => { var t = GoToDefinition(); };
             host.FindReferencesRequested += (s, e) => { var t = FindReferences(); };
             host.FindRequested += FindClick;
+            host.DebugValueResolver = ResolveDebugValue;
 
             var page = new TabPage(doc.DisplayName) { Name = path };
             var designerPath = FindDesignerSource(path, doc.Language);
@@ -458,6 +460,25 @@ namespace DevStudio.UI
             }
         }
 
+        private string ResolveDebugValue(string name)
+        {
+            var info = _lastStopInfo;
+            if (info == null || !_debugger.IsStopped || string.IsNullOrEmpty(name))
+            {
+                return null;
+            }
+            foreach (var variable in info.Locals)
+            {
+                if (string.Equals(variable.Name, name, StringComparison.Ordinal))
+                {
+                    return string.IsNullOrEmpty(variable.TypeName)
+                        ? variable.Value
+                        : variable.Value + "  (" + variable.TypeName + ")";
+                }
+            }
+            return null;
+        }
+
         private void StepOverClick(object sender, EventArgs e)
         {
             if (_debugger.IsStopped)
@@ -489,6 +510,7 @@ namespace DevStudio.UI
                 BeginInvoke(new Action<DebugStopInfo>(OnDebuggerStopped), info);
                 return;
             }
+            _lastStopInfo = info;
             callStackPanel.SetCallStack(info.CallStack);
             localsPanel.SetLocals(info.Locals);
             var reason = info.Reason ?? "Break";
@@ -530,6 +552,7 @@ namespace DevStudio.UI
                 BeginInvoke(new Action(OnDebuggerResumed));
                 return;
             }
+            _lastStopInfo = null;
             ClearDebugLines();
             statusLabel.Text = "Running";
             UpdateDebugUi();
@@ -542,6 +565,7 @@ namespace DevStudio.UI
                 BeginInvoke(new Action(OnDebuggerExited));
                 return;
             }
+            _lastStopInfo = null;
             ClearDebugLines();
             callStackPanel.Clear();
             localsPanel.Clear();

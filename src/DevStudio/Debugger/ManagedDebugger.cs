@@ -60,6 +60,11 @@ namespace DevStudio.Debugger
         private int _processId;
         private IntPtr _processHandle = IntPtr.Zero;
         private CorDebugThread _stoppedThread;
+        private bool _stepping;
+        private bool _stepIn;
+        private string _stepFile;
+        private int _stepLine = -1;
+        private int _stepCount;
 
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern bool TerminateProcess(IntPtr hProcess, uint exitCode);
@@ -261,6 +266,7 @@ namespace DevStudio.Debugger
             }
             _stopped = false;
             _stoppedThread = null;
+            _stepping = false;
             IsRunning = false;
             _steppers.Clear();
             _boundBreakpoints.Clear();
@@ -287,6 +293,7 @@ namespace DevStudio.Debugger
                         _stopped = false;
                         _stopCount++;
                         _stoppedThread = null;
+                        _stepping = false;
                         try
                         {
                             _process.Continue(false);
@@ -327,6 +334,10 @@ namespace DevStudio.Debugger
                         _steppers.Clear();
                         try
                         {
+                            RecordStepStart(thread);
+                            _stepIn = stepIn;
+                            _stepping = true;
+                            _stepCount = 0;
                             var stepper = thread.CreateStepper();
                             stepper.SetUnmappedStopMask(CorDebugUnmappedStop.STOP_NONE);
                             stepper.SetInterceptMask(CorDebugIntercept.INTERCEPT_NONE);
@@ -692,15 +703,28 @@ namespace DevStudio.Debugger
                 case CorDebugManagedCallbackKind.Breakpoint:
                     {
                         var bp = (BreakpointCorDebugManagedCallbackEventArgs)e;
+                        _stepping = false;
                         e.Continue = false;
                         OnBreakpointHit(bp.Breakpoint, bp.Thread);
                     }
                     break;
                 case CorDebugManagedCallbackKind.StepComplete:
-                    e.Continue = false;
-                    RaiseStop("Step complete", null, ((StepCompleteCorDebugManagedCallbackEventArgs)e).Thread);
+                    {
+                        var step = (StepCompleteCorDebugManagedCallbackEventArgs)e;
+                        if (_stepping && ContinueSourceLineStep(step.Thread))
+                        {
+                            Resume(e);
+                        }
+                        else
+                        {
+                            _stepping = false;
+                            e.Continue = false;
+                            RaiseStop("Step complete", null, step.Thread);
+                        }
+                    }
                     break;
                 case CorDebugManagedCallbackKind.Break:
+                    _stepping = false;
                     e.Continue = false;
                     RaiseStop("Break", null, ((BreakCorDebugManagedCallbackEventArgs)e).Thread);
                     break;
@@ -745,10 +769,87 @@ namespace DevStudio.Debugger
             }
         }
 
+        private void RecordStepStart(CorDebugThread thread)
+        {
+            _stepFile = null;
+            _stepLine = -1;
+            try
+            {
+                var frame = thread.ActiveFrame;
+                if (frame == null || frame.Function == null)
+                {
+                    return;
+                }
+                int token = frame.Function.Token;
+                int offset = -1;
+                var ilFrame = frame as CorDebugILFrame;
+                if (ilFrame != null)
+                {
+                    try { offset = ilFrame.IP.pnOffset; } catch { }
+                }
+                string file;
+                int line;
+                if (offset >= 0 && _map != null && _map.TryGetSourceLine(null, token, offset, out file, out line))
+                {
+                    _stepFile = file;
+                    _stepLine = line;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private bool ContinueSourceLineStep(CorDebugThread thread)
+        {
+            if (_stepCount >= 1000)
+            {
+                return false;
+            }
+            try
+            {
+                var frame = thread.ActiveFrame;
+                if (frame == null || frame.Function == null)
+                {
+                    return false;
+                }
+                int token = frame.Function.Token;
+                int offset = -1;
+                var ilFrame = frame as CorDebugILFrame;
+                if (ilFrame != null)
+                {
+                    try { offset = ilFrame.IP.pnOffset; } catch { }
+                }
+                string file;
+                int line;
+                if (offset >= 0 && _stepLine > 0 && _map != null && _map.TryGetSourceLine(null, token, offset, out file, out line) &&
+                    line == _stepLine && string.Equals(file, _stepFile, StringComparison.OrdinalIgnoreCase))
+                {
+                    _stepCount++;
+                    foreach (var old in _steppers)
+                    {
+                        try { old.Deactivate(); } catch { }
+                    }
+                    _steppers.Clear();
+                    var stepper = thread.CreateStepper();
+                    stepper.SetUnmappedStopMask(CorDebugUnmappedStop.STOP_NONE);
+                    stepper.SetInterceptMask(CorDebugIntercept.INTERCEPT_NONE);
+                    stepper.Step(_stepIn);
+                    _steppers.Add(stepper);
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+            return false;
+        }
+
         private void HandleException(CorDebugManagedCallbackEventArgs e, bool unhandled)
         {
             if (unhandled)
             {
+                _stepping = false;
                 e.Continue = false;
                 var thread = e is ExceptionCorDebugManagedCallbackEventArgs
                     ? ((ExceptionCorDebugManagedCallbackEventArgs)e).Thread
