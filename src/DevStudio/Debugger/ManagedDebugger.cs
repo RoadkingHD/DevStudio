@@ -155,7 +155,7 @@ namespace DevStudio.Debugger
                         default(SECURITY_ATTRIBUTES),
                         default(SECURITY_ATTRIBUTES),
                         false,
-                        CreateProcessFlags.DEBUG_ONLY_THIS_PROCESS,
+                        (CreateProcessFlags)0,
                         IntPtr.Zero,
                         Path.GetDirectoryName(exePath),
                         startupInfo,
@@ -684,6 +684,17 @@ namespace DevStudio.Debugger
             try { _map?.Dispose(); } catch { }
         }
 
+        private static string DescribeDebuggerError(HRESULT hr)
+        {
+            switch (hr)
+            {
+                case HRESULT.CORDBG_E_INTEROP_NOT_SUPPORTED: return "CORDBG_E_INTEROP_NOT_SUPPORTED: interop (mixed native/managed) debugging is not supported on this platform. Managed-only debugging continues; this error can usually be ignored.";
+                case HRESULT.CORDBG_E_UNSUPPORTED_DEBUGGING_MODEL: return "CORDBG_E_UNSUPPORTED_DEBUGGING_MODEL: the debuggee runtime does not support this debugging model.";
+                case HRESULT.CORDBG_E_DEBUGGING_NOT_POSSIBLE: return "CORDBG_E_DEBUGGING_NOT_POSSIBLE: debugging is not possible on this combination of runtimes.";
+                default: return "HRESULT 0x" + ((int)hr).ToString("X8");
+            }
+        }
+
         private sealed class BoundBp
         {
             public CorDebugFunctionBreakpoint Breakpoint;
@@ -754,7 +765,7 @@ namespace DevStudio.Debugger
                 OnDebuggerError += (s, e) =>
                 {
                     e.Continue = true;
-                    _owner.Output?.Invoke("Debugger error in debuggee (HRESULT " + e.ErrorHR + ").");
+                    _owner.Output?.Invoke("Debugger error in debuggee: " + DescribeDebuggerError(e.ErrorHR));
                 };
 
                 OnLogMessage += (s, e) =>

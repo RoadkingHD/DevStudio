@@ -61,9 +61,10 @@ namespace DevStudio.UI
         {
             solutionExplorer.FileOpenRequested += path => OpenFile(path);
             solutionExplorer.AddFileRequested += AddExistingFile;
+            solutionExplorer.AddNewFileRequested += AddNewFile;
             solutionExplorer.AddReferenceRequested += ShowAddReference;
             solutionExplorer.FileRemoved += RemoveFileFromProject;
-            solutionExplorer.ProjectRemoved += RemoveProject;
+            solutionExplorer.ProjectRemoved += CloseProject;
 
             editorTabs.SelectedIndexChanged += (s, e) => { RefreshBreakpointsPanel(); UpdateCaretStatus(); };
 
@@ -128,7 +129,7 @@ namespace DevStudio.UI
                 return;
             }
 
-            var doc = new EditorDocument(path, UiTheme.Current);
+            var doc = new EditorDocument(path);
             var host = new CodeEditorHost { Dock = DockStyle.Fill };
             host.LoadDocument(doc);
             host.ShowMinimap(_minimapVisible);
@@ -137,10 +138,6 @@ namespace DevStudio.UI
             host.TextChanged += (s, e) =>
             {
                 doc.Dirty = true;
-                if (doc.Language == DevLanguage.CSharp)
-                {
-                    WorkspaceManager.Instance.AddOrUpdateDocument(path, doc.Text.Text);
-                }
                 UpdateCaretStatus();
             };
             host.CaretMoved += UpdateCaretStatus;
@@ -219,7 +216,7 @@ namespace DevStudio.UI
             EditorTab designerTab;
             if (_tabsByPath.TryGetValue(designerPath, out designerTab))
             {
-                return designerTab.Doc.Text.Text;
+                return designerTab.Doc.Text;
             }
             return File.Exists(designerPath) ? File.ReadAllText(designerPath) : string.Empty;
         }
@@ -229,9 +226,9 @@ namespace DevStudio.UI
             EditorTab designerTab;
             if (_tabsByPath.TryGetValue(designerPath, out designerTab))
             {
-                if (designerTab.Editor.InnerEditor.Document.Text != text)
+                if (designerTab.Editor.GetText() != text)
                 {
-                    designerTab.Editor.InnerEditor.Document.Text = text;
+                    designerTab.Editor.SetText(text);
                 }
                 return;
             }
@@ -265,8 +262,9 @@ namespace DevStudio.UI
                 statusLabel.Text = "Ready";
                 return;
             }
-            var location = tab.Doc.Text.GetLocation(tab.Editor.InnerEditor.CaretOffset);
-            statusLabel.Text = string.Format("Line {0}, Column {1}", location.Line, location.Column);
+            int line, column;
+            tab.Editor.GetCaretLocation(out line, out column);
+            statusLabel.Text = string.Format("Line {0}, Column {1}", line, column);
         }
 
         private void SafeOutput(string line)
@@ -565,7 +563,7 @@ namespace DevStudio.UI
             {
                 return;
             }
-            var location = await _navigation.GoToDefinitionAsync(tab.Doc.FilePath, tab.Editor.InnerEditor.CaretOffset);
+            var location = await _navigation.GoToDefinitionAsync(tab.Doc.FilePath, tab.Editor.CaretOffset);
             if (location == null)
             {
                 return;
@@ -589,7 +587,7 @@ namespace DevStudio.UI
                 return;
             }
             var symbolName = GetWordAtCaret(tab);
-            var locations = await _navigation.FindReferencesAsync(tab.Doc.FilePath, tab.Editor.InnerEditor.CaretOffset);
+            var locations = await _navigation.FindReferencesAsync(tab.Doc.FilePath, tab.Editor.CaretOffset);
             var hits = locations.Select(l => new FindHit
             {
                 File = l.FilePath,
@@ -604,20 +602,23 @@ namespace DevStudio.UI
 
         private string GetWordAtCaret(EditorTab tab)
         {
-            var line = tab.Doc.Text.GetLineByOffset(tab.Editor.InnerEditor.CaretOffset);
-            var text = tab.Doc.Text.GetText(line.Offset, line.Length);
-            var column = tab.Editor.InnerEditor.CaretOffset - line.Offset;
-            int start = column;
-            while (start > 0 && (char.IsLetterOrDigit(text[start - 1]) || text[start - 1] == '_'))
+            int line, column;
+            tab.Editor.GetCaretLocation(out line, out column);
+            var text = tab.Doc.Text;
+            int lineStart = tab.Doc.GetLineOffset(line);
+            int lineLength = tab.Doc.GetLineLength(line);
+            int index = Math.Min(column - 1, lineLength);
+            int start = index;
+            while (start > 0 && (char.IsLetterOrDigit(text[lineStart + start - 1]) || text[lineStart + start - 1] == '_'))
             {
                 start--;
             }
-            int end = column;
-            while (end < text.Length && (char.IsLetterOrDigit(text[end]) || text[end] == '_'))
+            int end = index;
+            while (end < lineLength && (char.IsLetterOrDigit(text[lineStart + end]) || text[lineStart + end] == '_'))
             {
                 end++;
             }
-            return end > start ? text.Substring(start, end - start) : null;
+            return end > start ? text.Substring(lineStart + start, end - start) : null;
         }
 
         private void NavigateTo(string file, int line, int column)
@@ -639,9 +640,8 @@ namespace DevStudio.UI
                 {
                     try
                     {
-                        var lineObj = tab.Doc.Text.GetLineByNumber(line);
-                        var offset = lineObj.Offset + Math.Min(column - 1, lineObj.Length);
-                        tab.Editor.InnerEditor.CaretOffset = offset;
+                        var offset = tab.Doc.GetLineOffset(line) + Math.Min(column - 1, tab.Doc.GetLineLength(line));
+                        tab.Editor.CaretOffset = offset;
                     }
                     catch (ArgumentOutOfRangeException)
                     {
@@ -695,11 +695,11 @@ namespace DevStudio.UI
             {
                 return;
             }
-            var text = Microsoft.VisualBasic.Interaction.InputBox("Line number (1-" + tab.Doc.Text.LineCount + "):", "Go To Line", "1");
+            var text = Microsoft.VisualBasic.Interaction.InputBox("Line number (1-" + tab.Doc.LineCount + "):", "Go To Line", "1");
             int line;
             if (int.TryParse(text, out line) && line >= 1)
             {
-                tab.Editor.GotoLine(Math.Min(line, tab.Doc.Text.LineCount));
+                tab.Editor.GotoLine(Math.Min(line, tab.Doc.LineCount));
             }
         }
 
@@ -710,12 +710,12 @@ namespace DevStudio.UI
             {
                 return;
             }
-            int line = tab.Editor.InnerEditor.TextArea.Caret.Line;
+            int line = tab.Editor.CaretLine;
             if (!tab.Doc.BreakpointLines.Remove(line))
             {
                 tab.Doc.BreakpointLines.Add(line);
             }
-            tab.Editor.InnerEditor.TextArea.TextView.Redraw();
+            tab.Editor.RefreshBreakpoints();
             RefreshBreakpointsPanel();
         }
 
@@ -738,7 +738,7 @@ namespace DevStudio.UI
             if (_tabsByPath.TryGetValue(file, out tab))
             {
                 tab.Doc.BreakpointLines.Remove(line);
-                tab.Editor.InnerEditor.TextArea.TextView.Redraw();
+                tab.Editor.RefreshBreakpoints();
                 RefreshBreakpointsPanel();
             }
         }
@@ -750,7 +750,7 @@ namespace DevStudio.UI
             {
                 return;
             }
-            File.WriteAllText(tab.Doc.FilePath, tab.Doc.Text.Text);
+            File.WriteAllText(tab.Doc.FilePath, tab.Doc.Text);
             tab.Doc.Dirty = false;
             tab.Page.Text = tab.Doc.DisplayName;
             statusLabel.Text = "Saved " + tab.Doc.FilePath;
@@ -768,7 +768,7 @@ namespace DevStudio.UI
             {
                 if (tab.Doc.Dirty)
                 {
-                    File.WriteAllText(tab.Doc.FilePath, tab.Doc.Text.Text);
+                    File.WriteAllText(tab.Doc.FilePath, tab.Doc.Text);
                     tab.Doc.Dirty = false;
                     tab.Page.Text = tab.Doc.DisplayName;
                 }
@@ -787,6 +787,7 @@ namespace DevStudio.UI
                 {
                     return;
                 }
+                CloseAllProjects();
                 Directory.CreateDirectory(dialog.ProjectDirectory);
                 ProjectBase project;
                 if (dialog.Language == DevLanguage.CSharp)
@@ -891,6 +892,7 @@ namespace DevStudio.UI
 
         private void OpenProject(string path)
         {
+            CloseAllProjects();
             ProjectBase project;
             var extension = Path.GetExtension(path).ToLowerInvariant();
             try
@@ -955,6 +957,7 @@ namespace DevStudio.UI
 
         private void OpenSingleFile(string path)
         {
+            CloseAllProjects();
             OpenFile(path);
             if (_projects.Any(p => p is SingleFileProject && string.Equals(p.FilePath, path, StringComparison.OrdinalIgnoreCase)))
             {
@@ -1041,8 +1044,13 @@ namespace DevStudio.UI
             }
         }
 
-        private void RemoveProject(ProjectBase project)
+        private void CloseProject(ProjectBase project)
         {
+            var paths = new HashSet<string>(project.Items.Select(i => i.FullPath), StringComparer.OrdinalIgnoreCase);
+            foreach (var tab in _tabs.Where(t => paths.Contains(t.Doc.FilePath)).ToList())
+            {
+                CloseTab(tab);
+            }
             _projects.Remove(project);
             if (project is CSharpProject)
             {
@@ -1051,6 +1059,23 @@ namespace DevStudio.UI
                     WorkspaceManager.Instance.RemoveDocument(item.FullPath);
                 }
             }
+            solutionExplorer.RemoveProject(project);
+            var remainingCSharp = _projects.OfType<CSharpProject>().FirstOrDefault();
+            if (remainingCSharp != null)
+            {
+                WorkspaceManager.Instance.LoadProject(remainingCSharp);
+                foreach (var tab in _tabs.Where(t => t.Doc.Language == DevLanguage.CSharp).ToList())
+                {
+                    WorkspaceManager.Instance.AddOrUpdateDocument(tab.Doc.FilePath, tab.Doc.Text);
+                }
+            }
+            else
+            {
+                WorkspaceManager.Instance.Reset();
+            }
+            ClearDebugLines();
+            callStackPanel.Clear();
+            localsPanel.Clear();
             if (ActiveProject != null)
             {
                 Text = "DevStudio - " + ActiveProject.Name;
@@ -1060,6 +1085,57 @@ namespace DevStudio.UI
                 Text = "DevStudio";
             }
             UpdateDebugUi();
+            statusLabel.Text = "Closed project " + project.Name;
+        }
+
+        private void CloseAllProjects()
+        {
+            foreach (var tab in _tabs.ToList())
+            {
+                CloseTab(tab);
+            }
+            foreach (var project in _projects.ToList())
+            {
+                if (project is CSharpProject)
+                {
+                    foreach (var item in project.Items)
+                    {
+                        WorkspaceManager.Instance.RemoveDocument(item.FullPath);
+                    }
+                }
+            }
+            _projects.Clear();
+            solutionExplorer.ClearAll();
+            WorkspaceManager.Instance.Reset();
+            ClearDebugLines();
+            callStackPanel.Clear();
+            localsPanel.Clear();
+            breakpointsPanel.SetBreakpoints(new List<BreakpointsPanel.BreakpointEntry>());
+            Text = "DevStudio";
+            UpdateDebugUi();
+        }
+
+        private void AddNewFile(ProjectBase project)
+        {
+            using (var dialog = new AddNewFileDialog(project.Language, project.Name))
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(dialog.FileName))
+                {
+                    return;
+                }
+                var fullPath = Path.Combine(project.ProjectDirectory, dialog.FileName);
+                if (File.Exists(fullPath))
+                {
+                    MessageBox.Show(this, "A file with this name already exists in the project directory.", "DevStudio",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                File.WriteAllText(fullPath, dialog.GetTemplateContent());
+                AddFileToProject(project, fullPath);
+                solutionExplorer.RefreshProject(project);
+                OpenFile(fullPath);
+                statusLabel.Text = "Added " + dialog.FileName;
+            }
         }
 
         private void CloseTab(EditorTab tab)

@@ -28,6 +28,11 @@ namespace DevStudio.Dialogs
         public FindDialog()
         {
             InitializeComponent();
+            findButton.Click += (s, e) =>
+            {
+                DialogResult = DialogResult.OK;
+                Close();
+            };
             queryBox.SelectAll();
             queryBox.Focus();
         }

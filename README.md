@@ -7,16 +7,17 @@ debugging APIs) and for **C/C++** projects (compiled with an external MinGW tool
 
 ## Features
 
-### Editor (AvalonEdit)
-- Syntax coloring for C# (Roslyn classifier) and C/C++ (built-in scanner)
+### Editor (FastColoredTextBox)
+- Syntax coloring for C# (FastColoredTextBox highlighter + Roslyn semantic layer) and
+  C/C++ (custom regex-based highlighter)
 - Four color themes: **Dark**, **Light**, **Blue**, **Solarized Dark** (View > Color Theme)
-- **Code completion** (Ctrl+Space or after typing `.`) backed by the Roslyn completion service
-- **Syntax tooltips** on hover (symbol kind, signature, doc-comment summary)
-- **Colored syntax minimap** with viewport marker, click/drag to scroll
+- **Code completion** that pops up automatically while typing, on `.` and via Ctrl+Space,
+  backed by the Roslyn completion service
+- **Syntax tooltips** on hover at the mouse position (symbol kind, signature, doc-comment summary)
+- **Colored syntax minimap** (DocumentMap) with click/drag scrolling
 - Right-click context menu: Cut, Copy, Paste, Select All, **Go To Definition**,
   **Find References**, Find
-- Built-in find/replace panel inside the editor (Ctrl+F)
-- Breakpoint margin (click to toggle, F9 on the caret line)
+- Breakpoint gutter (click to toggle, F9 on the caret line)
 - Current-line highlight, current-statement highlight while debugging
 
 ### Tool windows (tabbed)

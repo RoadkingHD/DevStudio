@@ -135,6 +135,18 @@ namespace DevStudio.Services
             }
         }
 
+        public void Reset()
+        {
+            lock (_gate)
+            {
+                _workspace.ClearSolution();
+                _documentMap.Clear();
+                _project = null;
+                _projectId = null;
+                _compilationOptions = null;
+            }
+        }
+
         public void RemoveDocument(string filePath)
         {
             lock (_gate)

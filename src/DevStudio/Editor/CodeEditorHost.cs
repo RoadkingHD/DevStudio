@@ -1,46 +1,50 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.Linq;
+using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
-using System.Windows;
-using System.Windows.Input;
-using System.Windows.Media;
+using System.Windows.Forms;
+using DevStudio.Projects;
 using DevStudio.Services;
 using DevStudio.Theming;
-using ICSharpCode.AvalonEdit;
-using ICSharpCode.AvalonEdit.CodeCompletion;
-using ICSharpCode.AvalonEdit.Document;
-using ICSharpCode.AvalonEdit.Editing;
-using ICSharpCode.AvalonEdit.Rendering;
-using ICSharpCode.AvalonEdit.Search;
-using SW = System.Windows;
-using SWC = System.Windows.Controls;
-using SWP = System.Windows.Controls.Primitives;
+using FastColoredTextBoxNS;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Classification;
+using Microsoft.CodeAnalysis.Text;
 
 namespace DevStudio.Editor
 {
-    /// <summary>The code editor control: AvalonEdit hosted in WinForms, with completion,
-    /// quick info tooltips, minimap, breakpoint margin and an editor context menu.</summary>
-    public sealed class CodeEditorHost : System.Windows.Forms.UserControl
+    /// <summary>The code editor control: FastColoredTextBox with themed syntax highlighting,
+    /// Roslyn completion and quick info, minimap, breakpoints and an editor context menu.</summary>
+    public sealed class CodeEditorHost : UserControl
     {
-        private readonly System.Windows.Forms.Integration.ElementHost _elementHost;
-        private readonly SWC.Grid _grid;
-        private readonly SWC.ColumnDefinition _minimapColumn;
-        private readonly TextEditor _editor;
-        private readonly MinimapControl _minimap;
+        private const int GutterWidth = 16;
+        private readonly FastColoredTextBox _tb;
+        private readonly DocumentMap _minimap;
         private readonly CompletionAdapter _completion = new CompletionAdapter();
         private readonly QuickInfoAdapter _quickInfo = new QuickInfoAdapter();
-        private CompletionWindow _completionWindow;
-        private System.Windows.Threading.DispatcherTimer _workspacePushTimer;
+        private AutocompleteMenu _autocomplete;
         private EditorDocument _document;
-        private RoslynColorizer _roslynColorizer;
-        private CppColorizer _cppColorizer;
-        private DebugLineBackgroundRenderer _debugRenderer;
-        private BreakpointMargin _breakpointMargin;
-        private readonly SearchPanel _searchPanel;
-        private System.Windows.Threading.DispatcherTimer _hoverTimer;
-        private Point _lastMousePosition;
-        private SWP.Popup _quickInfoPopup;
+        private System.Windows.Forms.Timer _workspacePushTimer;
+        private TextStyle _defaultStyle;
+        private TextStyle _keywordStyle;
+        private TextStyle _controlKeywordStyle;
+        private TextStyle _typeStyle;
+        private TextStyle _stringStyle;
+        private TextStyle _commentStyle;
+        private TextStyle _numberStyle;
+        private TextStyle _preprocessorStyle;
+        private TextStyle _docCommentStyle;
+        private TextStyle _semanticTypeStyle;
+        private TextStyle _semanticInterfaceStyle;
+        private TextStyle _semanticMethodStyle;
+        private TextStyle _semanticFieldStyle;
+        private TextStyle _semanticVariableStyle;
+        private TextStyle _debugStyle;
+        private int _debugLine = -1;
+        private EditorTheme _theme;
 
         public new event EventHandler TextChanged;
         public event EventHandler CaretMoved;
@@ -49,85 +53,67 @@ namespace DevStudio.Editor
         public event EventHandler FindReferencesRequested;
         public event EventHandler FindRequested;
 
-        public TextEditor InnerEditor
-        {
-            get { return _editor; }
-        }
-
         public EditorDocument Document
         {
             get { return _document; }
         }
 
+        public int CaretOffset
+        {
+            get { return _tb != null ? _tb.SelectionStart : 0; }
+            set
+            {
+                if (_tb == null)
+                {
+                    return;
+                }
+                _tb.SelectionStart = Math.Max(0, Math.Min(value, _tb.TextLength));
+                _tb.DoSelectionVisible();
+            }
+        }
+
+        public int CaretLine
+        {
+            get { return _tb != null ? _tb.Selection.Start.iLine + 1 : 1; }
+        }
+
         public CodeEditorHost()
         {
-            _editor = new TextEditor
+            _tb = new FastColoredTextBox
             {
-                FontFamily = new FontFamily("Consolas"),
-                FontSize = 12.5,
+                Dock = DockStyle.Fill,
+                Font = new Font("Consolas", 10f),
                 ShowLineNumbers = true,
                 WordWrap = false,
-                Options = { ConvertTabsToSpaces = true, IndentationSize = 4, EnableHyperlinks = false, EnableEmailHyperlinks = false }
+                TabLength = 4,
+                AutoIndent = true,
+                AutoIndentChars = false,
+                HighlightingRangeType = HighlightingRangeType.VisibleRange,
+                LeftPadding = 2
             };
 
-            _minimap = new MinimapControl { Editor = _editor };
-            _minimapColumn = new SWC.ColumnDefinition { Width = new GridLength(110) };
+            _minimap = new DocumentMap
+            {
+                Dock = DockStyle.Right,
+                Width = 110,
+                Target = _tb
+            };
 
-            _grid = new SWC.Grid();
-            _grid.Children.Add(_editor);
-            _grid.Children.Add(_minimap);
-            _grid.ColumnDefinitions.Add(new SWC.ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            _grid.ColumnDefinitions.Add(_minimapColumn);
-            SWC.Grid.SetColumn(_editor, 0);
-            SWC.Grid.SetColumn(_minimap, 1);
+            Controls.Add(_tb);
+            Controls.Add(_minimap);
 
-            _elementHost = new System.Windows.Forms.Integration.ElementHost
-            {
-                Dock = System.Windows.Forms.DockStyle.Fill,
-                Child = _grid
-            };
-            Controls.Add(_elementHost);
-
-            _hoverTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(600) };
-            _hoverTimer.Tick += (s, e) =>
-            {
-                _hoverTimer.Stop();
-                var hoverTask = OnMouseHoverAsync(_lastMousePosition);
-            };
-            _editor.TextArea.MouseMove += (s, e) =>
-            {
-                _lastMousePosition = e.GetPosition(_editor.TextArea.TextView);
-                CloseQuickInfo();
-                _hoverTimer.Stop();
-                _hoverTimer.Start();
-            };
-            _editor.TextArea.MouseLeave += (s, e) =>
-            {
-                _hoverTimer.Stop();
-                CloseQuickInfo();
-            };
-            _editor.TextArea.TextEntered += OnTextEntered;
-            _editor.TextArea.PreviewKeyDown += OnPreviewKeyDown;
-            _editor.TextArea.Caret.PositionChanged += (s, e) => CaretMoved?.Invoke(this, EventArgs.Empty);
-            _editor.TextChanged += (s, e) =>
-            {
-                _workspacePushTimer.Stop();
-                _workspacePushTimer.Start();
-                TextChanged?.Invoke(this, EventArgs.Empty);
-            };
-            _editor.TextArea.TextView.MouseRightButtonUp += OnRightClick;
-
-            _workspacePushTimer = new System.Windows.Threading.DispatcherTimer
-            {
-                Interval = TimeSpan.FromMilliseconds(600)
-            };
+            _workspacePushTimer = new System.Windows.Forms.Timer { Interval = 600 };
             _workspacePushTimer.Tick += (s, e) =>
             {
                 _workspacePushTimer.Stop();
                 PushToWorkspace();
             };
 
-            _searchPanel = SearchPanel.Install(_editor.TextArea);
+            _tb.TextChanged += OnTextBoxTextChanged;
+            _tb.TextChangedDelayed += OnTextBoxTextChangedDelayed;
+            _tb.SelectionChanged += (s, e) => CaretMoved?.Invoke(this, EventArgs.Empty);
+            _tb.ToolTipNeeded += OnToolTipNeeded;
+            _tb.MouseDown += OnEditorMouseDown;
 
             BuildContextMenu();
             ApplyTheme(UiTheme.Current);
@@ -138,221 +124,260 @@ namespace DevStudio.Editor
             if (disposing)
             {
                 _workspacePushTimer?.Stop();
+                if (_autocomplete != null)
+                {
+                    _autocomplete.Close();
+                    _autocomplete.Dispose();
+                    _autocomplete = null;
+                }
             }
             base.Dispose(disposing);
         }
 
         public void LoadDocument(EditorDocument document)
         {
-            CloseQuickInfo();
-            var textView = _editor.TextArea.TextView;
-            if (_roslynColorizer != null)
+            if (_autocomplete != null)
             {
-                textView.LineTransformers.Remove(_roslynColorizer);
-                _roslynColorizer.ClassificationChanged -= OnClassificationChanged;
+                _autocomplete.Close();
             }
-            if (_cppColorizer != null)
-            {
-                textView.LineTransformers.Remove(_cppColorizer);
-                _cppColorizer.ClassificationChanged -= OnClassificationChanged;
-            }
-            if (_debugRenderer != null)
-            {
-                textView.BackgroundRenderers.Remove(_debugRenderer);
-            }
-            if (_breakpointMargin != null)
-            {
-                _editor.TextArea.LeftMargins.Remove(_breakpointMargin);
-            }
-
+            _debugLine = -1;
             _document = document;
-            _editor.Document = document.Text;
-            _editor.SyntaxHighlighting = null;
 
-            if (document.Language == Projects.DevLanguage.CSharp)
+            _tb.Bookmarks.Clear();
+            _tb.Language = document.Language == DevLanguage.Cpp ? Language.Custom : Language.CSharp;
+            ApplyTheme(_theme ?? UiTheme.Current);
+
+            _tb.Text = document.Text ?? "";
+
+            foreach (var line in document.BreakpointLines)
             {
-                _roslynColorizer = document.RoslynColorizer;
-                _roslynColorizer.ClassificationChanged += OnClassificationChanged;
-                textView.LineTransformers.Add(_roslynColorizer);
+                if (line >= 1 && line <= _tb.LinesCount)
+                {
+                    _tb.Bookmarks.Add(line - 1);
+                }
+            }
+
+            if (document.Language == DevLanguage.Cpp)
+            {
+                CppHighlight(_tb.Range);
             }
             else
             {
-                _cppColorizer = document.CppColorizer;
-                _cppColorizer.ClassificationChanged += OnClassificationChanged;
-                textView.LineTransformers.Add(_cppColorizer);
+                ApplySemanticHighlightingAsync();
             }
 
-            _debugRenderer = new DebugLineBackgroundRenderer(document);
-            textView.BackgroundRenderers.Add(_debugRenderer);
-
-            _breakpointMargin = new BreakpointMargin(document, line => BreakpointToggled?.Invoke(this, line));
-            _breakpointMargin.SetTheme(UiTheme.Current);
-            _editor.TextArea.LeftMargins.Add(_breakpointMargin);
-
-            _editor.ScrollToHome();
-            _editor.ScrollToLine(1);
+            _tb.DoCaretVisible();
             PushToWorkspace();
         }
 
-        public void ApplyTheme(EditorTheme theme)
+        public string GetText()
         {
-            _editor.Background = new SolidColorBrush(theme.Background.ToMedia());
-            _editor.Foreground = new SolidColorBrush(theme.Foreground.ToMedia());
-            _editor.TextArea.SelectionBrush = new SolidColorBrush(theme.Selection.ToMedia());
-            _editor.TextArea.SelectionBorder = null;
-            _editor.TextArea.TextView.CurrentLineBackground = new SolidColorBrush(theme.CurrentLine.ToMedia());
-            _editor.TextArea.TextView.CurrentLineBorder = null;
-            _minimap.InvalidateVisual();
-            _breakpointMargin?.SetTheme(theme);
+            return _tb.Text;
+        }
+
+        public void SetText(string text)
+        {
+            _tb.Text = text ?? "";
+        }
+
+        public void GetCaretLocation(out int line, out int column)
+        {
+            var place = _tb.Selection.Start;
+            line = place.iLine + 1;
+            column = place.iChar + 1;
         }
 
         public void ShowMinimap(bool show)
         {
-            _minimapColumn.Width = show ? new GridLength(110) : new GridLength(0);
+            _minimap.Visible = show;
+        }
+
+        public void ApplyTheme(EditorTheme theme)
+        {
+            _theme = theme;
+            _tb.BackColor = theme.Background;
+            _tb.ForeColor = theme.Foreground;
+            _tb.IndentBackColor = theme.Background;
+            _tb.PaddingBackColor = theme.Panel;
+            _tb.LineNumberColor = theme.LineNumber;
+            _tb.CaretColor = theme.Foreground;
+            _tb.SelectionColor = theme.Selection;
+            _tb.CurrentLineColor = theme.CurrentLine;
+            _tb.ServiceLinesColor = UiTheme.PanelBorder;
+            _tb.BookmarkColor = theme.BreakpointMark;
+            _tb.DefaultStyle = _defaultStyle = new TextStyle(BrushOf(theme.Foreground), null, FontStyle.Regular);
+
+            var highlighter = _tb.SyntaxHighlighter;
+            _keywordStyle = new TextStyle(BrushOf(theme.Keyword), null, FontStyle.Regular);
+            _controlKeywordStyle = new TextStyle(BrushOf(theme.ControlKeyword), null, FontStyle.Bold);
+            _typeStyle = new TextStyle(BrushOf(theme.Type), null, FontStyle.Regular);
+            _stringStyle = new TextStyle(BrushOf(theme.String), null, FontStyle.Regular);
+            _commentStyle = new TextStyle(BrushOf(theme.Comment), null, FontStyle.Regular);
+            _numberStyle = new TextStyle(BrushOf(theme.Number), null, FontStyle.Regular);
+            _preprocessorStyle = new TextStyle(BrushOf(theme.Preprocessor), null, FontStyle.Regular);
+            _docCommentStyle = new TextStyle(BrushOf(theme.XmlDoc), null, FontStyle.Regular);
+
+            highlighter.KeywordStyle = _keywordStyle;
+            highlighter.KeywordStyle2 = _controlKeywordStyle;
+            highlighter.KeywordStyle3 = _controlKeywordStyle;
+            highlighter.ClassNameStyle = _typeStyle;
+            highlighter.TypesStyle = _typeStyle;
+            highlighter.StringStyle = _stringStyle;
+            highlighter.CommentStyle = _commentStyle;
+            highlighter.NumberStyle = _numberStyle;
+            highlighter.AttributeStyle = _preprocessorStyle;
+            highlighter.CommentTagStyle = _docCommentStyle;
+            highlighter.VariableStyle = _semanticVariableStyle;
+            highlighter.FunctionsStyle = _semanticMethodStyle;
+
+            _semanticTypeStyle = new TextStyle(BrushOf(theme.Type), null, FontStyle.Regular);
+            _semanticInterfaceStyle = new TextStyle(BrushOf(theme.InterfaceName), null, FontStyle.Regular);
+            _semanticMethodStyle = new TextStyle(BrushOf(theme.MethodName), null, FontStyle.Regular);
+            _semanticFieldStyle = new TextStyle(BrushOf(theme.FieldName), null, FontStyle.Regular);
+            _semanticVariableStyle = new TextStyle(BrushOf(theme.VariableName), null, FontStyle.Regular);
+
+            _debugStyle = new TextStyle(null, new SolidBrush(Color.FromArgb(80, theme.CurrentStatement)), FontStyle.Regular);
+
+            _minimap.BackColor = theme.Background;
+            _minimap.ForeColor = theme.Foreground;
+            _minimap.NeedRepaint();
+
+            _tb.Invalidate();
+        }
+
+        private static SolidBrush BrushOf(Color color)
+        {
+            return new SolidBrush(color);
         }
 
         public void SetDebugLine(int line)
         {
-            if (_document != null)
+            if (_document == null)
             {
-                _document.CurrentDebugLine = line;
-                _editor.TextArea.TextView.Redraw();
-                if (line > 0)
+                return;
+            }
+            _document.CurrentDebugLine = line;
+            if (_debugLine >= 0 && _debugLine < _tb.LinesCount)
+            {
+                _tb.GetLine(_debugLine).ClearStyle(new Style[] { _debugStyle });
+            }
+            _debugLine = line - 1;
+            if (_debugLine >= 0 && _debugLine < _tb.LinesCount)
+            {
+                _tb.GetLine(_debugLine).SetStyle(_debugStyle);
+                _tb.DoRangeVisible(_tb.GetLine(_debugLine), true);
+            }
+            _tb.Invalidate();
+        }
+
+        public void RefreshBreakpoints()
+        {
+            if (_document == null)
+            {
+                return;
+            }
+            _tb.Bookmarks.Clear();
+            foreach (var line in _document.BreakpointLines)
+            {
+                if (line >= 1 && line <= _tb.LinesCount)
                 {
-                    _editor.ScrollToLine(line);
+                    _tb.Bookmarks.Add(line - 1);
                 }
             }
+            _tb.Invalidate();
         }
 
         public void GotoLine(int line)
         {
-            if (line < 1 || _document == null || line > _document.Text.LineCount)
+            if (_tb == null || line < 1 || line > _tb.LinesCount)
             {
                 return;
             }
-            var lineObj = _document.Text.GetLineByNumber(line);
-            _editor.CaretOffset = lineObj.Offset;
-            _editor.ScrollToLine(line);
-            _editor.Focus();
+            _tb.Selection.Start = new Place(0, line - 1);
+            _tb.DoSelectionVisible();
+            _tb.Focus();
         }
 
         public void GotoOffset(int offset)
         {
+            if (_tb == null)
+            {
+                return;
+            }
+            _tb.SelectionStart = Math.Max(0, Math.Min(offset, _tb.TextLength));
+            _tb.DoSelectionVisible();
+            _tb.Focus();
+        }
+
+        private void OnTextBoxTextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_document != null)
+            {
+                _document.Text = _tb.Text;
+                _document.Dirty = true;
+            }
+            _workspacePushTimer.Stop();
+            _workspacePushTimer.Start();
+
+            if (_document != null && _document.Language == DevLanguage.Cpp)
+            {
+                CppHighlight(_tb.Range);
+            }
+
+            TextChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        private void OnTextBoxTextChangedDelayed(object sender, TextChangedEventArgs e)
+        {
             if (_document == null)
             {
                 return;
             }
-            _editor.CaretOffset = offset;
-            var location = _document.Text.GetLocation(offset);
-            _editor.ScrollToLine(location.Line);
-            _editor.Focus();
-        }
-
-        public async void ShowCompletion(bool force)
-        {
-            if (_document == null || _document.Language != Projects.DevLanguage.CSharp || _completionWindow != null)
+            if (_document.Language == DevLanguage.CSharp)
             {
-                return;
-            }
-
-            try
-            {
-                var entries = await _completion.GetCompletionsAsync(_document, _editor.CaretOffset);
-                if (entries.Count == 0 || _completionWindow != null)
+                ApplySemanticHighlightingAsync();
+                ReapplyDebugLine();
+                var place = _tb.Selection.Start;
+                if (IsValidCompletionContext(place))
                 {
-                    return;
+                    ShowCompletion(false);
                 }
-
-                _completionWindow = new CompletionWindow(_editor.TextArea)
-                {
-                    MinWidth = 220,
-                    MaxHeight = 260
-                };
-                var window = _completionWindow;
-                var data = entries.Select(e => (ICompletionData)new RoslynCompletionData(_editor, _document, e, _completion)).ToArray();
-                var completionData = window.CompletionList.CompletionData;
-                foreach (var item in data)
-                {
-                    completionData.Add(item);
-                }
-                window.Closed += (o, args) => _completionWindow = null;
-                window.Show();
-            }
-            catch
-            {
             }
         }
 
-        private void OnTextEntered(object sender, TextCompositionEventArgs e)
+        private void ReapplyDebugLine()
         {
-            if (_document == null)
+            if (_debugLine >= 0 && _debugLine < _tb.LinesCount)
             {
-                return;
-            }
-            if (e.Text == "." && _document.Language == Projects.DevLanguage.CSharp)
-            {
-                ShowCompletion(false);
+                _tb.GetLine(_debugLine).SetStyle(_debugStyle);
             }
         }
 
-        private void OnPreviewKeyDown(object sender, KeyEventArgs e)
+        private void OnEditorMouseDown(object sender, MouseEventArgs e)
         {
-            if (e.Key == Key.Space && (Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Control) == System.Windows.Input.ModifierKeys.Control)
+            if (e.Button == MouseButtons.Left && e.X <= GutterWidth)
             {
-                e.Handled = true;
-                ShowCompletion(true);
+                var place = _tb.PointToPlace(new Point(_tb.LeftIndent, e.Y));
+                BreakpointToggled?.Invoke(this, place.iLine + 1);
             }
         }
 
-        private async Task OnMouseHoverAsync(Point point)
+        private void OnToolTipNeeded(object sender, ToolTipNeededEventArgs e)
         {
-            if (_document == null)
+            if (_document == null || _document.Language != DevLanguage.CSharp || string.IsNullOrEmpty(e.HoveredWord))
             {
                 return;
             }
             try
             {
-                var documentPoint = point + _editor.TextArea.TextView.ScrollOffset;
-                var position = _editor.TextArea.TextView.GetPositionFloor(documentPoint);
-                if (!position.HasValue)
-                {
-                    return;
-                }
-                var line = _editor.Document.GetLineByNumber(position.Value.Line);
-                var offset = _editor.Document.GetOffset(position.Value.Line, Math.Min(position.Value.Column, line.Length + 1));
-                var info = await _quickInfo.GetQuickInfoAsync(_document, offset);
+                int offset = _tb.PlaceToPosition(e.Place);
+                var info = Task.Run(() => _quickInfo.GetQuickInfoAsync(_document, offset)).GetAwaiter().GetResult();
                 if (!string.IsNullOrEmpty(info))
                 {
-                    var block = new SWC.TextBlock
-                    {
-                        Text = info,
-                        MaxWidth = 480,
-                        TextWrapping = TextWrapping.Wrap,
-                        Background = Brushes.Transparent,
-                        Foreground = new SolidColorBrush(UiTheme.Current.Text.ToMedia()),
-                        FontFamily = new FontFamily("Consolas")
-                    };
-                    var border = new SWC.Border
-                    {
-                        Child = block,
-                        Background = new SolidColorBrush(UiTheme.Current.Panel.ToMedia()),
-                        BorderBrush = new SolidColorBrush(UiTheme.PanelBorder.ToMedia()),
-                        BorderThickness = new Thickness(1),
-                        Padding = new Thickness(6)
-                    };
-                    CloseQuickInfo();
-                    _quickInfoPopup = new SWP.Popup
-                    {
-                        PlacementTarget = _editor.TextArea.TextView,
-                        Placement = SWP.PlacementMode.RelativePoint,
-                        HorizontalOffset = point.X + 14,
-                        VerticalOffset = point.Y + 18,
-                        StaysOpen = true,
-                        AllowsTransparency = true,
-                        Child = border
-                    };
-                    _quickInfoPopup.MouseLeave += (s, e) => CloseQuickInfo();
-                    _quickInfoPopup.IsOpen = true;
+                    int newline = info.IndexOf('\n');
+                    e.ToolTipTitle = newline > 0 ? info.Substring(0, newline).Trim() : info.Trim();
+                    e.ToolTipText = info;
+                    e.ToolTipIcon = ToolTipIcon.None;
                 }
             }
             catch
@@ -360,265 +385,249 @@ namespace DevStudio.Editor
             }
         }
 
-        private void CloseQuickInfo()
+        private bool IsValidCompletionContext(Place place)
         {
-            if (_quickInfoPopup != null)
+            if (place.iChar == 0)
             {
-                _quickInfoPopup.IsOpen = false;
-                _quickInfoPopup.Child = null;
-                _quickInfoPopup = null;
+                return false;
+            }
+            var lineText = _tb.GetLineText(place.iLine);
+            if (place.iChar > lineText.Length)
+            {
+                return false;
+            }
+            char prev = lineText[place.iChar - 1];
+            return char.IsLetterOrDigit(prev) || prev == '_' || prev == '.';
+        }
+
+        public async void ShowCompletion(bool forced)
+        {
+            if (_document == null || _document.Language != DevLanguage.CSharp || _tb.ReadOnly)
+            {
+                return;
+            }
+            var place = _tb.Selection.Start;
+            if (!forced && !IsValidCompletionContext(place))
+            {
+                return;
+            }
+            try
+            {
+                EnsureAutocomplete();
+                int caret = _tb.SelectionStart;
+                var entries = await _completion.GetCompletionsAsync(_document, caret);
+                if (_tb.IsDisposed || _document == null || entries.Count == 0 || _tb.SelectionStart != caret)
+                {
+                    return;
+                }
+                var items = new List<AutocompleteItem>();
+                foreach (var entry in entries)
+                {
+                    items.Add(new RoslynAutocompleteItem(entry.DisplayText, entry.Kind));
+                }
+                _autocomplete.Items.SetAutocompleteItems(items);
+                _autocomplete.Show(true);
+            }
+            catch
+            {
             }
         }
 
-        private void OnRightClick(object sender, MouseButtonEventArgs e)
+        private void EnsureAutocomplete()
         {
-            var menu = _editor.TextArea.ContextMenu;
-            if (menu != null)
+            if (_autocomplete != null)
             {
-                menu.PlacementTarget = _editor.TextArea;
-                menu.IsOpen = true;
-                e.Handled = true;
+                return;
             }
+            _autocomplete = new AutocompleteMenu(_tb)
+            {
+                MinFragmentLength = 1,
+                AppearInterval = 300,
+                AllowTabKey = true,
+                SearchPattern = @"[\w]",
+                Font = new Font("Segoe UI", 9f)
+            };
+            _autocomplete.SelectedColor = UiTheme.Accent;
+            _autocomplete.HoveredColor = UiTheme.PanelBorder;
+            _autocomplete.Opening += (s, e) =>
+            {
+                if (!IsValidCompletionContext(_tb.Selection.Start))
+                {
+                    e.Cancel = true;
+                }
+            };
         }
 
-        private void OnClassificationChanged(object sender, EventArgs e)
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
-            _editor.TextArea.TextView.Dispatcher.BeginInvoke(
-                new Action(() => _editor.TextArea.TextView.Redraw()),
-                System.Windows.Threading.DispatcherPriority.Background);
+            if (keyData == (Keys.Control | Keys.Space))
+            {
+                ShowCompletion(true);
+                return true;
+            }
+            return base.ProcessCmdKey(ref msg, keyData);
         }
 
         private void PushToWorkspace()
         {
-            if (_document == null || _document.Language != Projects.DevLanguage.CSharp)
+            if (_document == null || _document.Language != DevLanguage.CSharp)
             {
                 return;
             }
             try
             {
-                WorkspaceManager.Instance.AddOrUpdateDocument(_document.FilePath, _document.Text.Text);
+                WorkspaceManager.Instance.AddOrUpdateDocument(_document.FilePath, _tb.Text);
             }
             catch
             {
             }
         }
 
+        private async void ApplySemanticHighlightingAsync()
+        {
+            if (_document == null || _document.Language != DevLanguage.CSharp)
+            {
+                return;
+            }
+            try
+            {
+                var document = WorkspaceManager.Instance.GetDocument(_document.FilePath);
+                if (document == null)
+                {
+                    return;
+                }
+                int textLength = _tb.TextLength;
+                var spans = await Classifier.GetClassifiedSpansAsync(document, new TextSpan(0, textLength), CancellationToken.None);
+                if (_tb.IsDisposed || _document == null || _tb.TextLength != textLength)
+                {
+                    return;
+                }
+                _tb.Range.ClearStyle(new Style[] { _semanticTypeStyle, _semanticInterfaceStyle, _semanticMethodStyle, _semanticFieldStyle, _semanticVariableStyle, _controlKeywordStyle });
+                foreach (var span in spans)
+                {
+                    var style = MapClassification(span);
+                    if (style == null)
+                    {
+                        continue;
+                    }
+                    var start = _tb.PositionToPlace(span.TextSpan.Start);
+                    var end = _tb.PositionToPlace(span.TextSpan.End);
+                    _tb.GetRange(start, end).SetStyle(style);
+                }
+                ReapplyDebugLine();
+                _tb.Invalidate();
+            }
+            catch
+            {
+            }
+        }
+
+        private Style MapClassification(ClassifiedSpan span)
+        {
+            switch (span.ClassificationType)
+            {
+                case "ControlKeyword": return _controlKeywordStyle;
+                case "ClassName":
+                case "RecordClassName":
+                case "StructName":
+                case "EnumName":
+                case "DelegateName":
+                case "TypeName": return _semanticTypeStyle;
+                case "InterfaceName": return _semanticInterfaceStyle;
+                case "MethodName":
+                case "ExtensionMethodName": return _semanticMethodStyle;
+                case "FieldName":
+                case "PropertyName":
+                case "EventName":
+                case "ConstantName": return _semanticFieldStyle;
+                case "LocalName":
+                case "ParameterName":
+                case "RangeVariableName": return _semanticVariableStyle;
+                default: return null;
+            }
+        }
+
+        private void CppHighlight(Range range)
+        {
+            try
+            {
+                range.ClearStyle(new Style[] { _commentStyle, _stringStyle, _numberStyle, _preprocessorStyle, _keywordStyle });
+                range.SetStyle(_commentStyle, @"//.*$|/\*.*?\*/", RegexOptions.Multiline | RegexOptions.Singleline);
+                range.SetStyle(_stringStyle, "@?\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*'", RegexOptions.Singleline);
+                range.SetStyle(_preprocessorStyle, @"^\s*#\s*\w+.*$", RegexOptions.Multiline);
+                range.SetStyle(_keywordStyle, CppKeywordsPattern, RegexOptions.IgnoreCase);
+                range.SetStyle(_numberStyle, @"\b0[xX][0-9a-fA-F]+\b|\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?[fFuUlL]*\b");
+                _tb.Invalidate();
+            }
+            catch
+            {
+            }
+        }
+
+        private static readonly string CppKeywordsPattern =
+            @"\b(alignas|alignof|and|asm|auto|bool|break|case|catch|char|char8_t|char16_t|char32_t|class|compl|concept|const|consteval|constexpr|constinit|const_cast|continue|co_await|co_return|co_yield|decltype|default|delete|do|double|dynamic_cast|else|enum|explicit|export|extern|false|float|for|friend|goto|if|inline|int|long|mutable|namespace|new|noexcept|not|nullptr|operator|or|private|protected|public|register|reinterpret_cast|requires|return|short|signed|sizeof|static|static_assert|static_cast|struct|switch|template|this|thread_local|throw|true|try|typedef|typeid|typename|union|unsigned|using|virtual|void|volatile|wchar_t|while|xor|NULL)\b";
+
         private void BuildContextMenu()
         {
-            var menu = new SWC.ContextMenu();
+            var menu = new ContextMenuStrip();
 
-            var cut = new SWC.MenuItem { Header = "Cut", InputGestureText = "Ctrl+X", Command = ApplicationCommands.Cut };
-            var copy = new SWC.MenuItem { Header = "Copy", InputGestureText = "Ctrl+C", Command = ApplicationCommands.Copy };
-            var paste = new SWC.MenuItem { Header = "Paste", InputGestureText = "Ctrl+V", Command = ApplicationCommands.Paste };
-            var selectAll = new SWC.MenuItem { Header = "Select All", InputGestureText = "Ctrl+A", Command = ApplicationCommands.SelectAll };
+            var cut = new ToolStripMenuItem("Cut", null, (s, e) => _tb.Cut()) { ShortcutKeyDisplayString = "Ctrl+X" };
+            var copy = new ToolStripMenuItem("Copy", null, (s, e) => _tb.Copy()) { ShortcutKeyDisplayString = "Ctrl+C" };
+            var paste = new ToolStripMenuItem("Paste", null, (s, e) => _tb.Paste()) { ShortcutKeyDisplayString = "Ctrl+V" };
+            var selectAll = new ToolStripMenuItem("Select All", null, (s, e) => _tb.SelectAll()) { ShortcutKeyDisplayString = "Ctrl+A" };
 
-            var sep1 = new SWC.Separator();
-            var gotoDef = new SWC.MenuItem { Header = "Go To Definition", InputGestureText = "F12" };
-            gotoDef.Click += (s, e) => GoToDefinitionRequested?.Invoke(this, EventArgs.Empty);
-            var findRefs = new SWC.MenuItem { Header = "Find References", InputGestureText = "Shift+F12" };
-            findRefs.Click += (s, e) => FindReferencesRequested?.Invoke(this, EventArgs.Empty);
+            var gotoDef = new ToolStripMenuItem("Go To Definition", null, (s, e) => GoToDefinitionRequested?.Invoke(this, EventArgs.Empty)) { ShortcutKeyDisplayString = "F12" };
+            var findRefs = new ToolStripMenuItem("Find References", null, (s, e) => FindReferencesRequested?.Invoke(this, EventArgs.Empty)) { ShortcutKeyDisplayString = "Shift+F12" };
 
-            var sep2 = new SWC.Separator();
-            var find = new SWC.MenuItem { Header = "Find...", InputGestureText = "Ctrl+F" };
-            find.Click += (s, e) => FindRequested?.Invoke(this, EventArgs.Empty);
+            var find = new ToolStripMenuItem("Find...", null, (s, e) => FindRequested?.Invoke(this, EventArgs.Empty)) { ShortcutKeyDisplayString = "Ctrl+F" };
+
+            menu.Opening += (s, e) =>
+            {
+                bool hasSelection = !_tb.Selection.IsEmpty;
+                cut.Enabled = hasSelection;
+                copy.Enabled = hasSelection;
+                paste.Enabled = Clipboard.ContainsText();
+            };
 
             menu.Items.Add(cut);
             menu.Items.Add(copy);
             menu.Items.Add(paste);
+            menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(selectAll);
-            menu.Items.Add(sep1);
+            menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(gotoDef);
             menu.Items.Add(findRefs);
-            menu.Items.Add(sep2);
+            menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(find);
 
-            _editor.TextArea.ContextMenu = menu;
+            _tb.ContextMenuStrip = menu;
         }
 
-        private sealed class RoslynCompletionData : ICompletionData
+        private sealed class RoslynAutocompleteItem : AutocompleteItem
         {
-            private readonly TextEditor _editor;
-            private readonly EditorDocument _doc;
-            private readonly CompletionAdapter.CompletionEntry _entry;
-            private readonly CompletionAdapter _adapter;
+            private readonly string _kind;
 
-            public RoslynCompletionData(TextEditor editor, EditorDocument doc, CompletionAdapter.CompletionEntry entry, CompletionAdapter adapter)
+            public RoslynAutocompleteItem(string text, string kind) : base(text)
             {
-                _editor = editor;
-                _doc = doc;
-                _entry = entry;
-                _adapter = adapter;
+                _kind = kind;
+                ToolTipTitle = kind ?? "";
             }
 
-            public ImageSource Image
+            public override CompareResult Compare(string fragmentText)
             {
-                get { return null; }
-            }
-
-            public string Text
-            {
-                get { return _entry.DisplayText; }
-            }
-
-            public object Content
-            {
-                get { return _entry.DisplayText; }
-            }
-
-            public object Description
-            {
-                get
+                if (string.IsNullOrEmpty(fragmentText))
                 {
-                    try
-                    {
-                        return Task.Run(() => _adapter.GetDescriptionAsync(_doc, _entry)).GetAwaiter().GetResult();
-                    }
-                    catch
-                    {
-                        return _entry.Kind ?? "";
-                    }
+                    return CompareResult.Visible;
                 }
-            }
-
-            public double Priority
-            {
-                get { return 0; }
-            }
-
-            public void Complete(TextArea textArea, ISegment completionSegment, EventArgs invocationEventArgs)
-            {
-                string commit;
-                var caretOffset = textArea.Caret.Offset;
-                try
+                if (Text.StartsWith(fragmentText, StringComparison.InvariantCultureIgnoreCase) && Text != fragmentText)
                 {
-                    commit = Task.Run(() => _adapter.GetCommitTextAsync(_doc, _entry, caretOffset)).GetAwaiter().GetResult();
+                    return CompareResult.VisibleAndSelected;
                 }
-                catch
+                if (Text.ToLowerInvariant().Contains(fragmentText.ToLowerInvariant()))
                 {
-                    commit = _entry.DisplayText;
+                    return CompareResult.Visible;
                 }
-                var typedLength = textArea.Caret.Offset - completionSegment.Offset;
-                var replaceLength = Math.Max(0, typedLength);
-                textArea.Document.Replace(completionSegment.Offset, replaceLength, commit);
-            }
-        }
-    }
-
-    /// <summary>Margin that shows breakpoint circles and toggles breakpoints on click.</summary>
-    public sealed class BreakpointMargin : AbstractMargin
-    {
-        private readonly EditorDocument _doc;
-        private readonly Action<int> _toggle;
-        private EditorTheme _theme;
-        private const double CircleWidth = 16;
-
-        public BreakpointMargin(EditorDocument doc, Action<int> toggle)
-        {
-            _doc = doc;
-            _toggle = toggle;
-            _theme = UiTheme.Current;
-        }
-
-        public void SetTheme(EditorTheme theme)
-        {
-            _theme = theme;
-            InvalidateVisual();
-        }
-
-        protected override void OnTextViewChanged(TextView oldTextView, TextView newTextView)
-        {
-            if (oldTextView != null)
-            {
-                oldTextView.VisualLinesChanged -= OnVisualLinesChanged;
-            }
-            if (newTextView != null)
-            {
-                newTextView.VisualLinesChanged += OnVisualLinesChanged;
-            }
-            base.OnTextViewChanged(oldTextView, newTextView);
-            InvalidateVisual();
-        }
-
-        private void OnVisualLinesChanged(object sender, EventArgs e)
-        {
-            InvalidateVisual();
-        }
-
-        protected override Size MeasureOverride(Size availableSize)
-        {
-            return new Size(CircleWidth, 0);
-        }
-
-        protected override void OnRender(DrawingContext dc)
-        {
-            var textView = TextView;
-            if (textView == null || _doc == null)
-            {
-                return;
-            }
-            var brush = new SolidColorBrush(_theme.BreakpointMark.ToMedia());
-            foreach (var line in textView.VisualLines)
-            {
-                if (line.IsDisposed || line.TextLines.Count == 0)
-                {
-                    continue;
-                }
-                int number = line.FirstDocumentLine.LineNumber;
-                if (_doc.BreakpointLines.Contains(number))
-                {
-                    double y = line.GetTextLineVisualYPosition(line.TextLines[0], VisualYPosition.TextMiddle);
-                    dc.DrawEllipse(brush, null, new Point(CircleWidth / 2, y), 5.5, 5.5);
-                }
-            }
-        }
-
-        protected override void OnMouseDown(MouseButtonEventArgs e)
-        {
-            var textView = TextView;
-            if (textView == null || _doc == null)
-            {
-                return;
-            }
-            var pos = e.GetPosition(this);
-            var line = textView.GetDocumentLineByVisualTop(pos.Y + textView.VerticalOffset);
-            if (line != null)
-            {
-                _toggle?.Invoke(line.LineNumber);
-                e.Handled = true;
-            }
-            base.OnMouseDown(e);
-        }
-    }
-
-    /// <summary>Highlights the line where the debugger is currently stopped.</summary>
-    public sealed class DebugLineBackgroundRenderer : IBackgroundRenderer
-    {
-        private readonly EditorDocument _doc;
-
-        public DebugLineBackgroundRenderer(EditorDocument doc)
-        {
-            _doc = doc;
-        }
-
-        public KnownLayer Layer
-        {
-            get { return KnownLayer.Background; }
-        }
-
-        public void Draw(TextView textView, DrawingContext dc)
-        {
-            if (_doc == null || _doc.CurrentDebugLine <= 0)
-            {
-                return;
-            }
-            var line = textView.Document.GetLineByNumber(_doc.CurrentDebugLine);
-            var builder = new BackgroundGeometryBuilder { AlignToWholePixels = true };
-            builder.AddSegment(textView, line);
-            var geometry = builder.CreateGeometry();
-            if (geometry != null)
-            {
-                var brush = new SolidColorBrush(Color.FromArgb(90, 255, 214, 0));
-                dc.DrawGeometry(brush, null, geometry);
+                return CompareResult.Hidden;
             }
         }
     }

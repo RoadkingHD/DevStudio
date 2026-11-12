@@ -13,9 +13,19 @@ namespace DevStudio.Panels
     {
         public event Action<string> FileOpenRequested;
         public event Action<ProjectBase> AddFileRequested;
+        public event Action<ProjectBase> AddNewFileRequested;
         public event Action<ProjectBase> AddReferenceRequested;
         public event Action<ProjectItem> FileRemoved;
         public event Action<ProjectBase> ProjectRemoved;
+
+        private ToolStripMenuItem _openItem;
+        private ToolStripMenuItem _addExistingItem;
+        private ToolStripMenuItem _addNewItem;
+        private ToolStripMenuItem _addReferenceItem;
+        private ToolStripMenuItem _removeFileItem;
+        private ToolStripMenuItem _setStartupItem;
+        private ToolStripMenuItem _removeProjectItem;
+        private ToolStripMenuItem _closeProjectItem;
 
         public ProjectBase StartupProject { get; private set; }
 
@@ -50,6 +60,26 @@ namespace DevStudio.Panels
         {
             projectTree.Nodes.Clear();
             StartupProject = null;
+        }
+
+        public void RemoveProject(ProjectBase project)
+        {
+            for (int i = 0; i < projectTree.Nodes.Count; i++)
+            {
+                if (ReferenceEquals(projectTree.Nodes[i].Tag, project))
+                {
+                    projectTree.Nodes.RemoveAt(i);
+                    break;
+                }
+            }
+            if (ReferenceEquals(StartupProject, project))
+            {
+                StartupProject = projectTree.Nodes.Count > 0 ? projectTree.Nodes[0].Tag as ProjectBase : null;
+                if (StartupProject != null)
+                {
+                    SetStartup(StartupProject);
+                }
+            }
         }
 
         private TreeNode CreateProjectNode(ProjectBase project)
@@ -106,17 +136,20 @@ namespace DevStudio.Panels
         {
             var menu = new ContextMenuStrip();
 
-            var open = new ToolStripMenuItem("Open");
-            open.Click += (s, e) => WithFileNode(FileOpenRequested);
+            _openItem = new ToolStripMenuItem("Open");
+            _openItem.Click += (s, e) => WithFileNode(FileOpenRequested);
 
-            var addFile = new ToolStripMenuItem("Add Existing File...");
-            addFile.Click += (s, e) => WithProjectNode(AddFileRequested);
+            _addExistingItem = new ToolStripMenuItem("Add Existing File...");
+            _addExistingItem.Click += (s, e) => WithProjectNode(AddFileRequested);
 
-            var addRef = new ToolStripMenuItem("Add DLL Reference...");
-            addRef.Click += (s, e) => WithProjectNode(AddReferenceRequested);
+            _addNewItem = new ToolStripMenuItem("Add New File...");
+            _addNewItem.Click += (s, e) => WithProjectNode(AddNewFileRequested);
 
-            var removeFile = new ToolStripMenuItem("Remove From Project");
-            removeFile.Click += (s, e) =>
+            _addReferenceItem = new ToolStripMenuItem("Add DLL Reference...");
+            _addReferenceItem.Click += (s, e) => WithProjectNode(AddReferenceRequested);
+
+            _removeFileItem = new ToolStripMenuItem("Remove From Project");
+            _removeFileItem.Click += (s, e) =>
             {
                 if (projectTree.SelectedNode != null && projectTree.SelectedNode.Tag is ProjectItem)
                 {
@@ -126,8 +159,8 @@ namespace DevStudio.Panels
                 }
             };
 
-            var setStartup = new ToolStripMenuItem("Set as Startup Project");
-            setStartup.Click += (s, e) =>
+            _setStartupItem = new ToolStripMenuItem("Set as Startup Project");
+            _setStartupItem.Click += (s, e) =>
             {
                 if (projectTree.SelectedNode != null && projectTree.SelectedNode.Tag is ProjectBase)
                 {
@@ -135,30 +168,63 @@ namespace DevStudio.Panels
                 }
             };
 
-            var removeProject = new ToolStripMenuItem("Remove Project");
-            removeProject.Click += (s, e) =>
+            _removeProjectItem = new ToolStripMenuItem("Remove Project");
+            _removeProjectItem.Click += (s, e) =>
             {
                 if (projectTree.SelectedNode != null && projectTree.SelectedNode.Tag is ProjectBase)
                 {
-                    var project = (ProjectBase)projectTree.SelectedNode.Tag;
-                    projectTree.SelectedNode.Remove();
-                    if (ReferenceEquals(StartupProject, project))
-                    {
-                        StartupProject = projectTree.Nodes.Count > 0 ? projectTree.Nodes[0].Tag as ProjectBase : null;
-                    }
-                    ProjectRemoved?.Invoke(project);
+                    ProjectRemoved?.Invoke((ProjectBase)projectTree.SelectedNode.Tag);
                 }
             };
 
-            menu.Items.Add(open);
+            _closeProjectItem = new ToolStripMenuItem("Close Project");
+            _closeProjectItem.Click += (s, e) =>
+            {
+                if (projectTree.SelectedNode != null && projectTree.SelectedNode.Tag is ProjectBase)
+                {
+                    ProjectRemoved?.Invoke((ProjectBase)projectTree.SelectedNode.Tag);
+                }
+            };
+
+            menu.Items.Add(_openItem);
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(addFile);
-            menu.Items.Add(addRef);
-            menu.Items.Add(removeFile);
+            menu.Items.Add(_addExistingItem);
+            menu.Items.Add(_addNewItem);
+            menu.Items.Add(_addReferenceItem);
+            menu.Items.Add(_removeFileItem);
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(setStartup);
-            menu.Items.Add(removeProject);
+            menu.Items.Add(_setStartupItem);
+            menu.Items.Add(_closeProjectItem);
+            menu.Items.Add(_removeProjectItem);
+
+            menu.Opening += MenuOpening;
             projectTree.ContextMenuStrip = menu;
+        }
+
+        private void MenuOpening(object sender, System.ComponentModel.CancelEventArgs e)
+        {
+            if (_openItem == null)
+            {
+                return;
+            }
+            var node = projectTree.SelectedNode;
+            bool isFile = node != null && node.Tag is ProjectItem;
+            ProjectBase project = null;
+            var walk = node;
+            while (walk != null && project == null)
+            {
+                project = walk.Tag as ProjectBase;
+                walk = walk.Parent;
+            }
+            bool isProject = node != null && node.Tag is ProjectBase;
+            _openItem.Enabled = isFile;
+            _addExistingItem.Enabled = isProject;
+            _addNewItem.Enabled = isProject;
+            _addReferenceItem.Enabled = isProject && project != null && project.Language == DevLanguage.CSharp;
+            _removeFileItem.Enabled = isFile;
+            _setStartupItem.Enabled = isProject;
+            _closeProjectItem.Enabled = isProject;
+            _removeProjectItem.Enabled = isProject;
         }
 
         private void WithFileNode(Action<string> action)
