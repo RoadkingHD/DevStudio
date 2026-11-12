@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net472</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <UseWPF>true</UseWPF>
+    <LangVersion>7.3</LangVersion>
+    <RootNamespace>DevStudio</RootNamespace>
+    <AssemblyName>DevStudio</AssemblyName>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
+    <Version>1.0.0</Version>
+    <Product>DevStudio</Product>
+    <Description>Lightweight C# / C++ development studio with editor, compiler and debugger.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="Microsoft.VisualBasic" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="AvalonEdit" Version="6.3.0.90" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.8.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Features" Version="4.8.0" />
+    <PackageReference Include="System.Reflection.Metadata" Version="8.0.0" />
+    <PackageReference Include="ClrDebug" Version="0.4.2" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>
