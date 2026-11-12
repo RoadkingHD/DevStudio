@@ -157,7 +157,8 @@ namespace DevStudio.UI
             host.FindRequested += FindClick;
 
             var page = new TabPage(doc.DisplayName) { Name = path };
-            bool hasDesigner = doc.Language == DevLanguage.CSharp && File.ReadAllText(path).Contains("InitializeComponent");
+            var designerPath = FindDesignerSource(path, doc.Language);
+            bool hasDesigner = designerPath != null;
             if (hasDesigner)
             {
                 var designer = new DesignerHostControl { Dock = DockStyle.Fill };
@@ -170,22 +171,16 @@ namespace DevStudio.UI
                 tab.InnerTabs.TabPages.Add(tab.CodePage);
                 tab.InnerTabs.TabPages.Add(tab.DesignerPage);
                 page.Controls.Add(tab.InnerTabs);
-                designer.SourceChanged += text =>
-                {
-                    if (tab.Editor.InnerEditor.Document.Text != text)
-                    {
-                        tab.Editor.InnerEditor.Document.Text = text;
-                    }
-                };
+                designer.SourceChanged += text => WriteDesignerSource(designerPath, text);
                 designer.ViewCodeRequested += () => { tab.InnerTabs.SelectedTab = tab.CodePage; };
                 tab.InnerTabs.SelectedIndexChanged += (s, e) =>
                 {
                     if (tab.InnerTabs.SelectedTab == tab.DesignerPage)
                     {
-                        designer.LoadSource(tab.Doc.Text.Text);
+                        designer.LoadSource(GetDesignerSource(designerPath));
                     }
                 };
-                designer.LoadSource(doc.Text.Text);
+                designer.LoadSource(GetDesignerSource(designerPath));
             }
             else
             {
@@ -197,6 +192,54 @@ namespace DevStudio.UI
             _tabsByPath[path] = tab;
             editorTabs.TabPages.Add(page);
             editorTabs.SelectedTab = page;
+        }
+
+        private static string FindDesignerSource(string path, DevLanguage language)
+        {
+            if (language != DevLanguage.CSharp)
+            {
+                return null;
+            }
+            if (File.ReadAllText(path).IndexOf("InitializeComponent", StringComparison.Ordinal) >= 0)
+            {
+                return path;
+            }
+            var sibling = Path.Combine(Path.GetDirectoryName(path),
+                Path.GetFileNameWithoutExtension(path) + ".Designer.cs");
+            if (File.Exists(sibling) &&
+                File.ReadAllText(sibling).IndexOf("InitializeComponent", StringComparison.Ordinal) >= 0)
+            {
+                return sibling;
+            }
+            return null;
+        }
+
+        private string GetDesignerSource(string designerPath)
+        {
+            EditorTab designerTab;
+            if (_tabsByPath.TryGetValue(designerPath, out designerTab))
+            {
+                return designerTab.Doc.Text.Text;
+            }
+            return File.Exists(designerPath) ? File.ReadAllText(designerPath) : string.Empty;
+        }
+
+        private void WriteDesignerSource(string designerPath, string text)
+        {
+            EditorTab designerTab;
+            if (_tabsByPath.TryGetValue(designerPath, out designerTab))
+            {
+                if (designerTab.Editor.InnerEditor.Document.Text != text)
+                {
+                    designerTab.Editor.InnerEditor.Document.Text = text;
+                }
+                return;
+            }
+            if (!File.Exists(designerPath) || File.ReadAllText(designerPath) != text)
+            {
+                File.WriteAllText(designerPath, text);
+                WorkspaceManager.Instance.AddOrUpdateDocument(designerPath, text);
+            }
         }
 
         private EditorTab ActiveTab

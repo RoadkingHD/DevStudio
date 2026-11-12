@@ -133,8 +133,18 @@ namespace DevStudio.Projects
 
         protected static string GetElementText(XElement root, string name)
         {
-            var el = root.Descendants(name).FirstOrDefault();
+            var el = LocalDescendants(root, name).FirstOrDefault();
             return el == null ? null : (el.Value ?? "").Trim();
+        }
+
+        protected static IEnumerable<XElement> LocalDescendants(XElement root, string name)
+        {
+            return root.Descendants().Where(e => e.Name.LocalName == name);
+        }
+
+        protected static XElement LocalElement(XElement root, string name)
+        {
+            return root.Elements().FirstOrDefault(e => e.Name.LocalName == name);
         }
     }
 
@@ -246,10 +256,10 @@ namespace DevStudio.Projects
             var platform = GetElementText(root, "PlatformTarget");
             Platform = string.IsNullOrEmpty(platform) ? "AnyCPU" : platform;
 
-            var outPath = root.Descendants("OutputPath").FirstOrDefault();
+            var outPath = LocalDescendants(root, "OutputPath").FirstOrDefault();
             OutputPathSetting = outPath != null && !string.IsNullOrWhiteSpace(outPath.Value) ? outPath.Value.Trim() : "bin\\Debug";
 
-            foreach (var compile in root.Descendants("Compile"))
+            foreach (var compile in LocalDescendants(root, "Compile"))
             {
                 var inc = (string)compile.Attribute("Include");
                 if (!string.IsNullOrEmpty(inc))
@@ -258,7 +268,7 @@ namespace DevStudio.Projects
                 }
             }
 
-            foreach (var none in root.Descendants("None"))
+            foreach (var none in LocalDescendants(root, "None"))
             {
                 var inc = (string)none.Attribute("Include");
                 if (!string.IsNullOrEmpty(inc) && inc.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
@@ -267,7 +277,7 @@ namespace DevStudio.Projects
                 }
             }
 
-            foreach (var content in root.Descendants("Content"))
+            foreach (var content in LocalDescendants(root, "Content"))
             {
                 var inc = (string)content.Attribute("Include");
                 if (!string.IsNullOrEmpty(inc) && inc.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
@@ -276,7 +286,7 @@ namespace DevStudio.Projects
                 }
             }
 
-            foreach (var rf in root.Descendants("Reference"))
+            foreach (var rf in LocalDescendants(root, "Reference"))
             {
                 var name = (string)rf.Attribute("Include") ?? "";
                 var shortName = name.Split(',')[0].Trim();
@@ -287,7 +297,7 @@ namespace DevStudio.Projects
                     References.Add(new AssemblyReference { AssemblyName = shortName, IsFramework = true });
                     continue;
                 }
-                var hint = rf.Element("HintPath");
+                var hint = rf.Elements().FirstOrDefault(e => e.Name.LocalName == "HintPath");
                 References.Add(new AssemblyReference
                 {
                     AssemblyName = shortName,

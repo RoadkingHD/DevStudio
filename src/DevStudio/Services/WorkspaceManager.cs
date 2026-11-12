@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection.PortableExecutable;
 using DevStudio.Projects;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -208,6 +209,10 @@ namespace DevStudio.Services
                         name.StartsWith("Microsoft.", StringComparison.OrdinalIgnoreCase) ||
                         name == "mscorlib" || name == "netstandard" || name == "WindowsBase")
                     {
+                        if (!IsManagedAssembly(dll))
+                        {
+                            continue;
+                        }
                         try
                         {
                             list.Add(MetadataReference.CreateFromFile(dll));
@@ -229,7 +234,7 @@ namespace DevStudio.Services
                 try
                 {
                     var path = reference.Resolve(project.ProjectDirectory);
-                    if (File.Exists(path))
+                    if (File.Exists(path) && IsManagedAssembly(path))
                     {
                         list.Add(MetadataReference.CreateFromFile(path));
                     }
@@ -239,6 +244,26 @@ namespace DevStudio.Services
                 }
             }
             return list;
+        }
+
+        public static bool IsManagedAssembly(string path)
+        {
+            try
+            {
+                using (var stream = File.OpenRead(path))
+                using (var pe = new PEReader(stream))
+                {
+                    if (!pe.HasMetadata)
+                    {
+                        return false;
+                    }
+                    return System.Reflection.Metadata.PEReaderExtensions.GetMetadataReader(pe).IsAssembly;
+                }
+            }
+            catch
+            {
+                return false;
+            }
         }
     }
 }

@@ -67,10 +67,20 @@ namespace DevStudio.Build
                 try
                 {
                     var path = reference.Resolve(project.ProjectDirectory);
-                    if (File.Exists(path))
+                    if (File.Exists(path) && WorkspaceManager.IsManagedAssembly(path))
                     {
                         references.Add(MetadataReference.CreateFromFile(path));
                         _log("  Reference: " + path);
+                    }
+                    else if (File.Exists(path))
+                    {
+                        result.Diagnostics.Add(new DiagnosticItem
+                        {
+                            Severity = DiagnosticSeverityEx.Warning,
+                            Code = "DS0004",
+                            Message = "Reference skipped, not a managed assembly: " + path,
+                            Project = project.Name
+                        });
                     }
                     else
                     {

@@ -15,6 +15,7 @@ using ICSharpCode.AvalonEdit.Rendering;
 using ICSharpCode.AvalonEdit.Search;
 using SW = System.Windows;
 using SWC = System.Windows.Controls;
+using SWP = System.Windows.Controls.Primitives;
 
 namespace DevStudio.Editor
 {
@@ -39,6 +40,7 @@ namespace DevStudio.Editor
         private readonly SearchPanel _searchPanel;
         private System.Windows.Threading.DispatcherTimer _hoverTimer;
         private Point _lastMousePosition;
+        private SWP.Popup _quickInfoPopup;
 
         public new event EventHandler TextChanged;
         public event EventHandler CaretMoved;
@@ -95,10 +97,15 @@ namespace DevStudio.Editor
             _editor.TextArea.MouseMove += (s, e) =>
             {
                 _lastMousePosition = e.GetPosition(_editor.TextArea.TextView);
+                CloseQuickInfo();
                 _hoverTimer.Stop();
                 _hoverTimer.Start();
             };
-            _editor.TextArea.MouseLeave += (s, e) => _hoverTimer.Stop();
+            _editor.TextArea.MouseLeave += (s, e) =>
+            {
+                _hoverTimer.Stop();
+                CloseQuickInfo();
+            };
             _editor.TextArea.TextEntered += OnTextEntered;
             _editor.TextArea.PreviewKeyDown += OnPreviewKeyDown;
             _editor.TextArea.Caret.PositionChanged += (s, e) => CaretMoved?.Invoke(this, EventArgs.Empty);
@@ -137,6 +144,7 @@ namespace DevStudio.Editor
 
         public void LoadDocument(EditorDocument document)
         {
+            CloseQuickInfo();
             var textView = _editor.TextArea.TextView;
             if (_roslynColorizer != null)
             {
@@ -320,19 +328,45 @@ namespace DevStudio.Editor
                         Text = info,
                         MaxWidth = 480,
                         TextWrapping = TextWrapping.Wrap,
-                        Background = new SolidColorBrush(UiTheme.Current.Panel.ToMedia()),
+                        Background = Brushes.Transparent,
                         Foreground = new SolidColorBrush(UiTheme.Current.Text.ToMedia()),
                         FontFamily = new FontFamily("Consolas")
                     };
-                    _editor.TextArea.ToolTip = block;
-                }
-                else
-                {
-                    _editor.TextArea.ToolTip = null;
+                    var border = new SWC.Border
+                    {
+                        Child = block,
+                        Background = new SolidColorBrush(UiTheme.Current.Panel.ToMedia()),
+                        BorderBrush = new SolidColorBrush(UiTheme.PanelBorder.ToMedia()),
+                        BorderThickness = new Thickness(1),
+                        Padding = new Thickness(6)
+                    };
+                    CloseQuickInfo();
+                    _quickInfoPopup = new SWP.Popup
+                    {
+                        PlacementTarget = _editor.TextArea.TextView,
+                        Placement = SWP.PlacementMode.RelativePoint,
+                        HorizontalOffset = point.X + 14,
+                        VerticalOffset = point.Y + 18,
+                        StaysOpen = true,
+                        AllowsTransparency = true,
+                        Child = border
+                    };
+                    _quickInfoPopup.MouseLeave += (s, e) => CloseQuickInfo();
+                    _quickInfoPopup.IsOpen = true;
                 }
             }
             catch
             {
+            }
+        }
+
+        private void CloseQuickInfo()
+        {
+            if (_quickInfoPopup != null)
+            {
+                _quickInfoPopup.IsOpen = false;
+                _quickInfoPopup.Child = null;
+                _quickInfoPopup = null;
             }
         }
 
@@ -454,9 +488,10 @@ namespace DevStudio.Editor
             public void Complete(TextArea textArea, ISegment completionSegment, EventArgs invocationEventArgs)
             {
                 string commit;
+                var caretOffset = textArea.Caret.Offset;
                 try
                 {
-                    commit = Task.Run(() => _adapter.GetCommitTextAsync(_doc, _entry, textArea.Caret.Offset)).GetAwaiter().GetResult();
+                    commit = Task.Run(() => _adapter.GetCommitTextAsync(_doc, _entry, caretOffset)).GetAwaiter().GetResult();
                 }
                 catch
                 {

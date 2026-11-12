@@ -104,6 +104,7 @@ namespace DevStudio.Theming
                 strip.ForeColor = Text;
                 strip.RenderMode = ToolStripRenderMode.Professional;
                 strip.Renderer = new ThemeToolStripRenderer(Current.IsDark);
+                ApplyToolStripItems(strip.Items);
             }
             else if (control is Panel || control is SplitterPanel || control is GroupBox)
             {
@@ -116,9 +117,32 @@ namespace DevStudio.Theming
                 control.ForeColor = Text;
             }
 
+            if (control.ContextMenuStrip != null)
+            {
+                var contextMenu = control.ContextMenuStrip;
+                contextMenu.BackColor = Window;
+                contextMenu.ForeColor = Text;
+                contextMenu.Renderer = new ThemeToolStripRenderer(Current.IsDark);
+                ApplyToolStripItems(contextMenu.Items);
+            }
+
             foreach (Control child in control.Controls)
             {
                 ApplyRecursive(child);
+            }
+        }
+
+        private static void ApplyToolStripItems(ToolStripItemCollection items)
+        {
+            foreach (ToolStripItem item in items)
+            {
+                item.ForeColor = Text;
+                item.BackColor = Color.Transparent;
+                var dropDown = item as ToolStripDropDownItem;
+                if (dropDown != null)
+                {
+                    ApplyToolStripItems(dropDown.DropDownItems);
+                }
             }
         }
 

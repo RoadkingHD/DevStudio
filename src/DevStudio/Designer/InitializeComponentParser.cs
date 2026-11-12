@@ -190,6 +190,19 @@ namespace DevStudio.Designer
             var memberAccess = target as MemberAccessExpressionSyntax;
             if (memberAccess != null)
             {
+                if (memberAccess.Expression is ThisExpressionSyntax)
+                {
+                    var creation = assignment.Right as ObjectCreationExpressionSyntax;
+                    if (creation != null)
+                    {
+                        var createdType = NormalizeType(creation.Type.ToString());
+                        if (!createdType.StartsWith("System.ComponentModel."))
+                        {
+                            GetOrCreate(model, memberAccess.Name.Identifier.ValueText).TypeName = createdType;
+                        }
+                        return;
+                    }
+                }
                 var ownerName = GetOwnerName(memberAccess.Expression);
                 var propertyName = memberAccess.Name.Identifier.ValueText;
                 if (ownerName == null)
@@ -226,7 +239,13 @@ namespace DevStudio.Designer
                 return;
             }
 
-            var ownerName = GetOwnerName(called.Expression);
+            var containerExpression = called.Expression;
+            var containerMember = containerExpression as MemberAccessExpressionSyntax;
+            if (containerMember != null && containerMember.Name.Identifier.ValueText == "Controls")
+            {
+                containerExpression = containerMember.Expression;
+            }
+            var ownerName = GetOwnerName(containerExpression);
             if (ownerName == null)
             {
                 return;
@@ -263,17 +282,36 @@ namespace DevStudio.Designer
 
         private static string GetOwnerName(ExpressionSyntax expression)
         {
-            var memberAccess = expression as MemberAccessExpressionSyntax;
-            if (memberAccess != null)
+            if (expression is ThisExpressionSyntax)
             {
-                if (memberAccess.Expression is ThisExpressionSyntax)
-                {
-                    return "this";
-                }
-                var outer = GetOwnerName(memberAccess.Expression);
-                return outer ?? memberAccess.Expression.ToString();
+                return "this";
             }
-            return null;
+            var memberAccess = expression as MemberAccessExpressionSyntax;
+            if (memberAccess == null)
+            {
+                return null;
+            }
+            if (IsThisRooted(memberAccess.Expression))
+            {
+                return memberAccess.Name.Identifier.ValueText;
+            }
+            var outer = GetOwnerName(memberAccess.Expression);
+            if (outer != null)
+            {
+                return outer;
+            }
+            var identifier = memberAccess.Expression as IdentifierNameSyntax;
+            return identifier != null ? identifier.Identifier.ValueText : memberAccess.Expression.ToString();
+        }
+
+        private static bool IsThisRooted(ExpressionSyntax expression)
+        {
+            if (expression is ThisExpressionSyntax)
+            {
+                return true;
+            }
+            var memberAccess = expression as MemberAccessExpressionSyntax;
+            return memberAccess != null && IsThisRooted(memberAccess.Expression);
         }
 
         public static string NormalizeType(string typeName)
