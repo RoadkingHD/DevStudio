@@ -197,18 +197,23 @@ namespace DevStudio.UI
             {
                 return null;
             }
-            if (File.ReadAllText(path).IndexOf("InitializeComponent", StringComparison.Ordinal) >= 0)
+            if (HasInitializeComponentDeclaration(File.ReadAllText(path)))
             {
                 return path;
             }
             var sibling = Path.Combine(Path.GetDirectoryName(path),
                 Path.GetFileNameWithoutExtension(path) + ".Designer.cs");
             if (File.Exists(sibling) &&
-                File.ReadAllText(sibling).IndexOf("InitializeComponent", StringComparison.Ordinal) >= 0)
+                HasInitializeComponentDeclaration(File.ReadAllText(sibling)))
             {
                 return sibling;
             }
             return null;
+        }
+
+        private static bool HasInitializeComponentDeclaration(string source)
+        {
+            return source.IndexOf("void InitializeComponent", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private string GetDesignerSource(string designerPath)
@@ -501,8 +506,19 @@ namespace DevStudio.UI
                 EditorTab tab;
                 if (_tabsByPath.TryGetValue(Path.GetFullPath(frame.File), out tab))
                 {
+                    editorTabs.SelectedTab = tab.Page;
+                    if (tab.InnerTabs != null)
+                    {
+                        tab.InnerTabs.SelectedTab = tab.CodePage;
+                    }
                     tab.Editor.SetDebugLine(frame.Line);
+                    tab.Editor.Focus();
                 }
+                if (WindowState == FormWindowState.Minimized)
+                {
+                    WindowState = FormWindowState.Normal;
+                }
+                Activate();
             }
             UpdateDebugUi();
         }

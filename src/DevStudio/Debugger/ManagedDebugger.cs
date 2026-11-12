@@ -190,14 +190,29 @@ namespace DevStudio.Debugger
                                 _process.Continue(false);
                                 _stopped = false;
                             }
-                            _process.Terminate(0);
+                            try { _process.Terminate(0); } catch { }
                         }
+                        EndSession();
                     }
                 });
             }
             catch
             {
             }
+        }
+
+        private void EndSession()
+        {
+            try { _map?.Dispose(); } catch { }
+            _map = null;
+            try { _corDebug?.Terminate(); } catch { }
+            _corDebug = null;
+            _process = null;
+            _stopped = false;
+            IsRunning = false;
+            _steppers.Clear();
+            _boundBreakpoints.Clear();
+            _pendingBreakpoints.Clear();
         }
 
         public void Continue()
@@ -393,13 +408,20 @@ namespace DevStudio.Debugger
                 var activeIlFrame = activeFrame as CorDebugILFrame;
                 if (activeIlFrame != null)
                 {
+                    int activeToken = 0;
+                    try { activeToken = activeFrame.Function?.Token ?? 0; } catch { }
                     try
                     {
                         var locals = activeIlFrame.LocalVariables;
                         int index = 0;
                         foreach (var value in locals)
                         {
-                            info.Locals.Add(FormatValue("local[" + index + "]", value));
+                            string name;
+                            if (_map == null || !_map.TryGetLocalName(activeToken, index, out name))
+                            {
+                                name = "local[" + index + "]";
+                            }
+                            info.Locals.Add(FormatValue(name, value));
                             index++;
                         }
                         try
@@ -636,7 +658,8 @@ namespace DevStudio.Debugger
                     break;
                 case CorDebugManagedCallbackKind.ExitProcess:
                     e.Continue = true;
-                    IsRunning = false;
+                    Resume(e);
+                    EndSession();
                     Output?.Invoke("Debuggee process exited.");
                     ProcessExited?.Invoke();
                     break;

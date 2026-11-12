@@ -56,6 +56,24 @@ namespace DevStudio.Designer
                 return;
             }
 
+            try
+            {
+                LoadModelCore(model);
+            }
+            catch
+            {
+                Controls.Clear();
+                _rootControl = null;
+            }
+            finally
+            {
+                ResumeLayout();
+                Invalidate();
+            }
+        }
+
+        private void LoadModelCore(DesignerModel model)
+        {
             int width = 640, height = 480;
             var clientSize = model.Root.Properties["ClientSize"];
             if (clientSize != null)
@@ -81,7 +99,7 @@ namespace DevStudio.Designer
             _rootControl = CreateControlFor(model.Root);
             if (_rootControl == null)
             {
-                _rootControl = new Panel { Size = new Size(width, height) };
+                _rootControl = CreatePlaceholder(width, height);
             }
             _rootControl.Size = new Size(width, height);
             _rootControl.Location = new Point(0, 0);
@@ -103,9 +121,6 @@ namespace DevStudio.Designer
 
             Controls.Add(_rootControl);
             _rootControl.BringToFront();
-
-            ResumeLayout();
-            Invalidate();
         }
 
         private Control FindParentControl(ControlInfo info)
@@ -156,9 +171,15 @@ namespace DevStudio.Designer
                 }
                 if (type == null || !typeof(Control).IsAssignableFrom(type))
                 {
-                    return new Panel();
+                    return CreatePlaceholder(200, 100);
                 }
                 var instance = (Control)Activator.CreateInstance(type);
+                var form = instance as Form;
+                if (form != null)
+                {
+                    form.TopLevel = false;
+                    form.FormBorderStyle = FormBorderStyle.None;
+                }
                 instance.Name = info.IsRoot ? "" : info.Name;
                 instance.Enabled = false;
 
@@ -166,12 +187,26 @@ namespace DevStudio.Designer
                 {
                     ApplyProperty(instance, property.Key, property.Value);
                 }
+                if (form != null && !instance.Visible)
+                {
+                    instance.Visible = true;
+                }
                 return instance;
             }
             catch
             {
-                return new Panel();
+                return CreatePlaceholder(200, 100);
             }
+        }
+
+        private static Control CreatePlaceholder(int width, int height)
+        {
+            return new Panel
+            {
+                Size = new Size(width, height),
+                BackColor = Color.FromArgb(200, 200, 205),
+                BorderStyle = BorderStyle.FixedSingle
+            };
         }
 
         private static void ApplyProperty(Control instance, string propertyName, string expression)

@@ -24,6 +24,7 @@ namespace DevStudio.Debugger
         private readonly Dictionary<string, List<BreakpointBinding>> _byLine = new Dictionary<string, List<BreakpointBinding>>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, Dictionary<int, SortedList<int, int>>> _ilToLine = new Dictionary<string, Dictionary<int, SortedList<int, int>>>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<int, string> _methodNames = new Dictionary<int, string>();
+        private readonly Dictionary<int, Dictionary<int, string>> _localNames = new Dictionary<int, Dictionary<int, string>>();
         private MetadataReaderProvider _pdbProvider;
         private PEReader _peReader;
         private MetadataReader _pdbReader;
@@ -41,12 +42,12 @@ namespace DevStudio.Debugger
                     return;
                 }
 
-                _pdbProvider = MetadataReaderProvider.FromPortablePdbStream(File.OpenRead(pdbPath));
+                _pdbProvider = MetadataReaderProvider.FromPortablePdbStream(OpenShared(pdbPath));
                 _pdbReader = _pdbProvider.GetMetadataReader();
 
                 if (File.Exists(exePath))
                 {
-                    _peReader = new PEReader(File.OpenRead(exePath));
+                    _peReader = new PEReader(OpenShared(exePath));
                     _peMetadataReader = _peReader.GetMetadataReader();
                     foreach (var methodHandle in _peMetadataReader.MethodDefinitions)
                     {
@@ -67,6 +68,7 @@ namespace DevStudio.Debugger
                         continue;
                     }
                     var methodToken = MetadataTokens.GetToken(MetadataTokens.MethodDefinitionHandle(row));
+                    LoadLocalNames(methodToken, handle);
                     var points = debugInfo.GetSequencePoints().ToList();
                     if (points.Count == 0)
                     {
@@ -117,6 +119,50 @@ namespace DevStudio.Debugger
             {
                 Loaded = false;
             }
+        }
+
+        private void LoadLocalNames(int methodToken, MethodDebugInformationHandle debugInfoHandle)
+        {
+            try
+            {
+                var names = new Dictionary<int, string>();
+                foreach (var scopeHandle in _pdbReader.GetLocalScopes(debugInfoHandle))
+                {
+                    var scope = _pdbReader.GetLocalScope(scopeHandle);
+                    foreach (var variableHandle in scope.GetLocalVariables())
+                    {
+                        var variable = _pdbReader.GetLocalVariable(variableHandle);
+                        var name = _pdbReader.GetString(variable.Name);
+                        if (!string.IsNullOrEmpty(name))
+                        {
+                            names[variable.Index] = name;
+                        }
+                    }
+                }
+                if (names.Count > 0)
+                {
+                    _localNames[methodToken] = names;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        public bool TryGetLocalName(int methodToken, int localIndex, out string name)
+        {
+            name = null;
+            Dictionary<int, string> names;
+            if (!_localNames.TryGetValue(methodToken, out names))
+            {
+                return false;
+            }
+            return names.TryGetValue(localIndex, out name);
+        }
+
+        private static FileStream OpenShared(string path)
+        {
+            return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         }
 
         public bool TryBind(string file, int line, out BreakpointBinding binding)
