@@ -41,8 +41,6 @@ namespace DevStudio.UI
         private System.Windows.Forms.ToolStripMenuItem stepIntoMenu;
         private System.Windows.Forms.ToolStripMenuItem stepOutMenu;
         private System.Windows.Forms.ToolStripMenuItem toggleBreakpointMenu;
-        private System.Windows.Forms.ToolStripMenuItem toolsMenu;
-        private System.Windows.Forms.ToolStripMenuItem addReferenceMenu;
         private System.Windows.Forms.ToolStripMenuItem helpMenu;
         private System.Windows.Forms.ToolStripMenuItem aboutMenu;
 
@@ -119,8 +117,6 @@ namespace DevStudio.UI
             this.stepIntoMenu = new System.Windows.Forms.ToolStripMenuItem();
             this.stepOutMenu = new System.Windows.Forms.ToolStripMenuItem();
             this.toggleBreakpointMenu = new System.Windows.Forms.ToolStripMenuItem();
-            this.toolsMenu = new System.Windows.Forms.ToolStripMenuItem();
-            this.addReferenceMenu = new System.Windows.Forms.ToolStripMenuItem();
             this.helpMenu = new System.Windows.Forms.ToolStripMenuItem();
             this.aboutMenu = new System.Windows.Forms.ToolStripMenuItem();
 
@@ -159,7 +155,6 @@ namespace DevStudio.UI
             this.viewMenu,
             this.buildMenu,
             this.debugMenu,
-            this.toolsMenu,
             this.helpMenu});
             this.menuStrip.Location = new System.Drawing.Point(0, 0);
             this.menuStrip.Name = "menuStrip";
@@ -361,19 +356,6 @@ namespace DevStudio.UI
             this.toggleBreakpointMenu.ShortcutKeys = System.Windows.Forms.Keys.F9;
             this.toggleBreakpointMenu.Text = "Toggle Breakpoint";
             this.toggleBreakpointMenu.Click += new System.EventHandler(this.ToggleBreakpointClick);
-            //
-            // toolsMenu
-            //
-            this.toolsMenu.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
-            this.addReferenceMenu});
-            this.toolsMenu.Name = "toolsMenu";
-            this.toolsMenu.Text = "&Tools";
-            //
-            // addReferenceMenu
-            //
-            this.addReferenceMenu.Name = "addReferenceMenu";
-            this.addReferenceMenu.Text = "Add DLL Reference...";
-            this.addReferenceMenu.Click += new System.EventHandler(this.AddReferenceClick);
             //
             // helpMenu
             //

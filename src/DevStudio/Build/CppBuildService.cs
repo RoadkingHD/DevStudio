@@ -14,8 +14,16 @@ namespace DevStudio.Build
     public sealed class CppBuildService
     {
         private static readonly Regex GccErrorRegex = new Regex(
-            @"^(?<file>[^:]+):(?<line>\d+):(?<col>\d+):\s+(?<severity>error|warning|note):\s*(?<message>.*)$",
+            @"^(?<file>.+?):(?<line>\d+):(?<col>\d+):\s*(?<severity>fatal error|error|warning|note):\s*(?<message>.*)$",
             RegexOptions.Compiled);
+
+        private static readonly Regex GccShortErrorRegex = new Regex(
+            @"^(?<file>.+?):(?<line>\d+):\s*(?<severity>fatal error|error|warning|note):\s*(?<message>.*)$",
+            RegexOptions.Compiled);
+
+        private static readonly Regex GccToolErrorRegex = new Regex(
+            @"^(?<tool>.*?(?:mingw32-make|make|collect2|\bld|cc1plus|cc1|as)(?:\.exe)?)\s*:?\s*(?<message>.*)$",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         private readonly Action<string> _log;
         public string CompilerPath { get; set; }
@@ -186,18 +194,49 @@ namespace DevStudio.Build
                     {
                         _log("  " + line);
                         var match = GccErrorRegex.Match(line);
+                        var hasColumn = match.Success;
+                        if (!match.Success)
+                        {
+                            match = GccShortErrorRegex.Match(line);
+                        }
                         if (match.Success)
                         {
+                            var severity = match.Groups["severity"].Value;
                             result.Diagnostics.Add(new DiagnosticItem
                             {
-                                Severity = match.Groups["severity"].Value == "error" ? DiagnosticSeverityEx.Error
-                                    : match.Groups["severity"].Value == "warning" ? DiagnosticSeverityEx.Warning
+                                Severity = severity.Contains("error") ? DiagnosticSeverityEx.Error
+                                    : severity == "warning" ? DiagnosticSeverityEx.Warning
                                     : DiagnosticSeverityEx.Message,
                                 Code = "gcc",
                                 Message = match.Groups["message"].Value,
                                 File = match.Groups["file"].Value,
                                 Line = int.Parse(match.Groups["line"].Value),
-                                Column = int.Parse(match.Groups["col"].Value),
+                                Column = hasColumn ? int.Parse(match.Groups["col"].Value) : 1,
+                                Project = project.Name
+                            });
+                            continue;
+                        }
+                        if (line.IndexOf("undefined reference", StringComparison.OrdinalIgnoreCase) >= 0
+                            || line.IndexOf("cannot find", StringComparison.OrdinalIgnoreCase) >= 0
+                            || line.IndexOf("multiple definition", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            result.Diagnostics.Add(new DiagnosticItem
+                            {
+                                Severity = DiagnosticSeverityEx.Error,
+                                Code = "ld",
+                                Message = line,
+                                Project = project.Name
+                            });
+                            continue;
+                        }
+                        var toolMatch = GccToolErrorRegex.Match(line);
+                        if (toolMatch.Success && (line.Contains("***") || line.IndexOf("error", StringComparison.OrdinalIgnoreCase) >= 0))
+                        {
+                            result.Diagnostics.Add(new DiagnosticItem
+                            {
+                                Severity = DiagnosticSeverityEx.Error,
+                                Code = "gcc",
+                                Message = line,
                                 Project = project.Name
                             });
                         }

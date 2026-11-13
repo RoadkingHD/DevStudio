@@ -439,7 +439,7 @@ namespace DevStudio.UI
                     outputPanel.AppendLine("Output: " + result.OutputPath);
                 }
                 buildStatusLabel.Text = result.Success ? "Build succeeded" : "Build failed";
-                if (result.Diagnostics.Count > 0)
+                if (result.Diagnostics.Count > 0 || !result.Success)
                 {
                     SelectBottomTab("ErrorList");
                 }
@@ -711,11 +711,15 @@ namespace DevStudio.UI
             bool running = _debugger.IsRunning;
             bool stopped = _debugger.IsStopped;
             bool canBuild = !_building && !running;
+            bool debuggingSupported = ActiveProject == null || ActiveProject.Language != DevLanguage.Cpp;
             stopButton.Enabled = stopDebugMenu.Enabled = running;
             stepOverButton.Enabled = stepOverMenu.Enabled = stopped;
             stepIntoButton.Enabled = stepIntoMenu.Enabled = stopped;
             stepOutButton.Enabled = stepOutMenu.Enabled = stopped;
             buildButton.Enabled = buildSolutionMenu.Enabled = rebuildSolutionMenu.Enabled = canBuild;
+            startButton.Enabled = startDebugMenu.Enabled = canBuild && debuggingSupported;
+            startWithoutDebugMenu.Enabled = canBuild;
+            toggleBreakpointMenu.Enabled = debuggingSupported;
             startButton.Text = stopped ? "Continue" : "Start";
             startDebugMenu.Text = stopped ? "Continue" : "Start Debugging";
         }
@@ -1123,7 +1127,6 @@ namespace DevStudio.UI
 
         private void OpenProject(string path)
         {
-            CloseAllProjects();
             ProjectBase project;
             var extension = Path.GetExtension(path).ToLowerInvariant();
             try
@@ -1161,7 +1164,10 @@ namespace DevStudio.UI
             _projects.Add(project);
             solutionExplorer.LoadProject(project);
             statusLabel.Text = "Loaded project " + project.Name;
-            Text = "DevStudio - " + project.Name;
+            Text = _projects.Count > 1
+                ? "DevStudio - " + _projects.Count + " Projects"
+                : "DevStudio - " + project.Name;
+            UpdateDebugUi();
         }
 
         private void OpenSingleFileClick(object sender, EventArgs e)
@@ -1239,17 +1245,6 @@ namespace DevStudio.UI
             }
         }
 
-        private void AddReferenceClick(object sender, EventArgs e)
-        {
-            var project = ActiveProject;
-            if (project == null)
-            {
-                MessageBox.Show(this, "No project is loaded.", "DevStudio", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-            ShowAddReference(project);
-        }
-
         private void RemoveFileFromProject(ProjectItem item)
         {
             var project = _projects.FirstOrDefault(p => p.Items.Contains(item));
@@ -1305,7 +1300,9 @@ namespace DevStudio.UI
             localsPanel.Clear();
             if (ActiveProject != null)
             {
-                Text = "DevStudio - " + ActiveProject.Name;
+                Text = _projects.Count > 1
+                    ? "DevStudio - " + _projects.Count + " Projects"
+                    : "DevStudio - " + ActiveProject.Name;
             }
             else
             {

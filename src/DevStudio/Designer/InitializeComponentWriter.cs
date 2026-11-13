@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
+using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -437,6 +438,24 @@ namespace DevStudio.Designer
                     return expr;
                 }
 
+                if (targetType == typeof(string[]))
+                {
+                    var openBrace = expr.IndexOf('{');
+                    var closeBrace = expr.LastIndexOf('}');
+                    if (openBrace < 0 || closeBrace <= openBrace)
+                    {
+                        return new string[0];
+                    }
+                    var inner = expr.Substring(openBrace + 1, closeBrace - openBrace - 1);
+                    var values = new List<string>();
+                    foreach (System.Text.RegularExpressions.Match m in
+                        System.Text.RegularExpressions.Regex.Matches(inner, "\"((?:[^\"\\\\]|\\\\.)*)\""))
+                    {
+                        values.Add(UnescapeSourceString(m.Groups[1].Value));
+                    }
+                    return values.ToArray();
+                }
+
                 if (targetType != null)
                 {
                     var converter = System.ComponentModel.TypeDescriptor.GetConverter(targetType);
@@ -512,6 +531,11 @@ namespace DevStudio.Designer
             {
                 return "\"" + value + "\"";
             }
+            if (value is string[])
+            {
+                var strings = (string[])value;
+                return "new string[] { " + string.Join(", ", strings.Select(QuoteSourceString)) + " }";
+            }
             if (value is float)
             {
                 return ((float)value).ToString(System.Globalization.CultureInfo.InvariantCulture) + "F";
@@ -548,6 +572,64 @@ namespace DevStudio.Designer
                 return "new System.Drawing.Rectangle(" + rect.X + ", " + rect.Y + ", " + rect.Width + ", " + rect.Height + ")";
             }
             return null;
+        }
+
+        public static string QuoteSourceString(string value)
+        {
+            var sb = new StringBuilder("\"");
+            foreach (var ch in value ?? "")
+            {
+                if (ch == '\\')
+                {
+                    sb.Append("\\\\");
+                }
+                else if (ch == '"')
+                {
+                    sb.Append("\\\"");
+                }
+                else if (ch == '\n')
+                {
+                    sb.Append("\\n");
+                }
+                else if (ch == '\r')
+                {
+                    sb.Append("\\r");
+                }
+                else if (ch == '\t')
+                {
+                    sb.Append("\\t");
+                }
+                else
+                {
+                    sb.Append(ch);
+                }
+            }
+            sb.Append("\"");
+            return sb.ToString();
+        }
+
+        private static string UnescapeSourceString(string value)
+        {
+            var sb = new StringBuilder();
+            for (int i = 0; i < value.Length; i++)
+            {
+                if (value[i] == '\\' && i + 1 < value.Length)
+                {
+                    i++;
+                    switch (value[i])
+                    {
+                        case 'n': sb.Append('\n'); break;
+                        case 'r': sb.Append('\r'); break;
+                        case 't': sb.Append('\t'); break;
+                        default: sb.Append(value[i]); break;
+                    }
+                }
+                else
+                {
+                    sb.Append(value[i]);
+                }
+            }
+            return sb.ToString();
         }
     }
 }

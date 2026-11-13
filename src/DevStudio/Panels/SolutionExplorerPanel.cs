@@ -24,7 +24,6 @@ namespace DevStudio.Panels
         private ToolStripMenuItem _addNewItem;
         private ToolStripMenuItem _addReferenceItem;
         private ToolStripMenuItem _removeFileItem;
-        private ToolStripMenuItem _setStartupItem;
         private ToolStripMenuItem _removeProjectItem;
         private ToolStripMenuItem _closeProjectItem;
 
@@ -192,15 +191,6 @@ namespace DevStudio.Panels
                 }
             };
 
-            _setStartupItem = new ToolStripMenuItem("Set as Startup Project");
-            _setStartupItem.Click += (s, e) =>
-            {
-                if (projectTree.SelectedNode != null && projectTree.SelectedNode.Tag is ProjectBase)
-                {
-                    SetStartup((ProjectBase)projectTree.SelectedNode.Tag);
-                }
-            };
-
             _removeProjectItem = new ToolStripMenuItem("Remove Project");
             _removeProjectItem.Click += (s, e) =>
             {
@@ -226,7 +216,6 @@ namespace DevStudio.Panels
             menu.Items.Add(_addReferenceItem);
             menu.Items.Add(_removeFileItem);
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(_setStartupItem);
             menu.Items.Add(_closeProjectItem);
             menu.Items.Add(_removeProjectItem);
 
@@ -256,7 +245,6 @@ namespace DevStudio.Panels
             _addReferenceItem.Enabled = project != null && project.Language == DevLanguage.CSharp
                 && (isProject || IsReferencesContainer(node));
             _removeFileItem.Enabled = isFile;
-            _setStartupItem.Enabled = isProject;
             _closeProjectItem.Enabled = isProject;
             _removeProjectItem.Enabled = isProject;
         }

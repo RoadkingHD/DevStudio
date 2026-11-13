@@ -1,3 +1,4 @@
+using System;
 using System.Drawing;
 using System.Windows.Forms;
 using DevStudio.Theming;
@@ -15,7 +16,7 @@ namespace DevStudio.UI
             MinimizeBox = false;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.CenterParent;
-            ClientSize = new Size(620, 560);
+            ClientSize = new Size(820, 660);
             BackColor = UiTheme.Window;
             ForeColor = UiTheme.Text;
             Font = new Font("Segoe UI", 9F);
@@ -42,8 +43,14 @@ namespace DevStudio.UI
                 ForeColor = UiTheme.Text,
                 BorderStyle = BorderStyle.None,
                 Font = new Font("Consolas", 9F),
+                TabStop = false,
                 Text = BuildAboutText()
             };
+            text.GotFocus += (s, e) => BeginInvoke(new Action(() =>
+            {
+                text.SelectionStart = text.TextLength;
+                text.SelectionLength = 0;
+            }));
 
             var ok = new Button
             {
