@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -8,6 +9,8 @@ namespace DevStudio.Theming
     public static class UiTheme
     {
         public static event EventHandler ThemeChanged;
+
+        private static readonly List<TabControl> _closeButtonTabs = new List<TabControl>();
 
         private static EditorTheme _current = EditorTheme.Dark;
         public static EditorTheme Current
@@ -48,7 +51,7 @@ namespace DevStudio.Theming
             if (control is TabControl tab)
             {
                 tab.ForeColor = Text;
-                if (Current.IsDark)
+                if (Current.IsDark || _closeButtonTabs.Contains(tab))
                 {
                     tab.DrawMode = TabDrawMode.OwnerDrawFixed;
                     tab.DrawItem -= TabOnDrawItem;
@@ -159,6 +162,21 @@ namespace DevStudio.Theming
             TextRenderer.DrawText(e.Graphics, e.Node.Text, tv.Font, e.Bounds, fore, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
         }
 
+        public static void EnableTabCloseButtons(TabControl tab)
+        {
+            if (!_closeButtonTabs.Contains(tab))
+            {
+                _closeButtonTabs.Add(tab);
+            }
+            tab.DrawMode = TabDrawMode.OwnerDrawFixed;
+            tab.ItemSize = new Size(160, 22);
+        }
+
+        public static Rectangle TabCloseRect(Rectangle tabBounds)
+        {
+            return new Rectangle(tabBounds.Right - 18, tabBounds.Top + 5, 13, tabBounds.Height - 10);
+        }
+
         private static void TabOnDrawItem(object sender, DrawItemEventArgs e)
         {
             var tab = (TabControl)sender;
@@ -169,8 +187,21 @@ namespace DevStudio.Theming
             {
                 e.Graphics.FillRectangle(back, bounds);
             }
-            TextRenderer.DrawText(e.Graphics, page.Text, tab.Font, bounds, selected ? Color.White : Text,
-                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter);
+            var textBounds = _closeButtonTabs.Contains(tab)
+                ? new Rectangle(bounds.X + 6, bounds.Y, bounds.Width - 26, bounds.Height)
+                : bounds;
+            TextRenderer.DrawText(e.Graphics, page.Text, tab.Font, textBounds, selected ? Color.White : Text,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter | TextFormatFlags.EndEllipsis);
+            if (_closeButtonTabs.Contains(tab))
+            {
+                var closeRect = TabCloseRect(bounds);
+                e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                using (var pen = new Pen(selected ? Color.White : Text, 1.4f))
+                {
+                    e.Graphics.DrawLine(pen, closeRect.Left + 3, closeRect.Top + 3, closeRect.Right - 3, closeRect.Bottom - 3);
+                    e.Graphics.DrawLine(pen, closeRect.Right - 3, closeRect.Top + 3, closeRect.Left + 3, closeRect.Bottom - 3);
+                }
+            }
         }
 
         private sealed class ThemeToolStripRenderer : ToolStripProfessionalRenderer

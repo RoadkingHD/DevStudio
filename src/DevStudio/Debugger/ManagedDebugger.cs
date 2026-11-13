@@ -36,6 +36,7 @@ namespace DevStudio.Debugger
     {
         public string Reason { get; set; }
         public string ExceptionMessage { get; set; }
+        public bool IsStep { get; set; }
         public List<DebugStackFrame> CallStack { get; } = new List<DebugStackFrame>();
         public List<DebugVariable> Locals { get; } = new List<DebugVariable>();
         public int ThreadId { get; set; }
@@ -722,9 +723,10 @@ namespace DevStudio.Debugger
                         }
                         else
                         {
+                            bool wasStepping = _stepping;
                             _stepping = false;
                             e.Continue = false;
-                            RaiseStop("Step complete", null, step.Thread);
+                            RaiseStop("Step complete", null, step.Thread, wasStepping);
                         }
                     }
                     break;
@@ -1055,11 +1057,12 @@ namespace DevStudio.Debugger
             RaiseStop(reason, null, eventThread);
         }
 
-        private void RaiseStop(string reason, string exceptionMessage, CorDebugThread eventThread = null)
+        private void RaiseStop(string reason, string exceptionMessage, CorDebugThread eventThread = null, bool isStep = false)
         {
             _stopped = true;
             var info = CaptureStopInfo(reason, eventThread);
             info.ExceptionMessage = exceptionMessage;
+            info.IsStep = isStep;
             Stopped?.Invoke(info);
         }
 

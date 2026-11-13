@@ -20,6 +20,7 @@ namespace DevStudio.Designer
 
         public event Action<string> SourceChanged;
         public event Action ViewCodeRequested;
+        public event Action<string> DiagnosticOutput;
 
         private static readonly string[] ToolboxControls =
         {
@@ -52,6 +53,7 @@ namespace DevStudio.Designer
             _surface.Dock = DockStyle.Fill;
             _surface.SelectionChanged += OnSelectionChanged;
             _surface.ModelChanged += OnModelChanged;
+            _surface.Diagnostic += message => DiagnosticOutput?.Invoke(message);
 
             _propertyGrid.Dock = DockStyle.Fill;
             _propertyGrid.ToolbarVisible = false;

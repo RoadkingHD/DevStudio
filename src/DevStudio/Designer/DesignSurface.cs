@@ -20,6 +20,7 @@ namespace DevStudio.Designer
 
         public event Action ModelChanged;
         public event Action<Control> SelectionChanged;
+        public event Action<string> Diagnostic;
 
         public DesignSurface()
         {
@@ -181,11 +182,20 @@ namespace DevStudio.Designer
                 var type = Type.GetType(info.TypeName + ", System.Windows.Forms");
                 if (type == null)
                 {
+                    type = typeof(Form).Assembly.GetType(info.TypeName);
+                }
+                if (type == null)
+                {
                     type = Type.GetType(info.TypeName);
                 }
-                if (type == null || !typeof(Control).IsAssignableFrom(type))
+                if (type == null)
                 {
+                    RaiseDiagnostic("Designer: type not found for '" + info.Name + "': " + info.TypeName);
                     return CreatePlaceholder(200, 100);
+                }
+                if (!typeof(Control).IsAssignableFrom(type))
+                {
+                    return null;
                 }
                 var instance = (Control)Activator.CreateInstance(type);
                 var form = instance as Form;
@@ -207,10 +217,16 @@ namespace DevStudio.Designer
                 }
                 return instance;
             }
-            catch
+            catch (Exception ex)
             {
+                RaiseDiagnostic("Designer: could not create '" + info.Name + "' (" + info.TypeName + "): " + ex.Message);
                 return CreatePlaceholder(200, 100);
             }
+        }
+
+        private void RaiseDiagnostic(string message)
+        {
+            Diagnostic?.Invoke(message);
         }
 
         private static Control CreatePlaceholder(int width, int height)
@@ -288,6 +304,7 @@ namespace DevStudio.Designer
                 _dragging = false;
                 ((Control)sender).Capture = false;
                 UpdateModelFromControl(_selected);
+                SelectionChanged?.Invoke(_selected);
             }
         }
 

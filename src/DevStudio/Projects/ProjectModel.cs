@@ -379,6 +379,17 @@ namespace DevStudio.Projects
                     compileGroup.Add(new XElement(ns + "Compile", new XAttribute("Include", rel)));
                 }
             }
+            var knownPaths = new HashSet<string>(
+                Items.Select(i => MakeRelative(ProjectDirectory, i.FullPath)),
+                StringComparer.OrdinalIgnoreCase);
+            foreach (var compile in compileGroup.Elements(ns + "Compile").ToList())
+            {
+                var inc = (string)compile.Attribute("Include");
+                if (string.IsNullOrEmpty(inc) || !knownPaths.Contains(inc))
+                {
+                    compile.Remove();
+                }
+            }
 
             var knownRefs = new HashSet<string>(References.Select(r => r.AssemblyName ?? r.HintPath), StringComparer.OrdinalIgnoreCase);
             if (refGroup == null)
@@ -576,6 +587,22 @@ namespace DevStudio.Projects
                     compileGroup.Add(new XElement(ns + "ClCompile", new XAttribute("Include", rel)));
                 }
             }
+            var knownCompiles = new HashSet<string>(
+                Items.Where(i =>
+                {
+                    var ext = Path.GetExtension(i.FullPath).ToLowerInvariant();
+                    return ext == ".c" || ext == ".cpp" || ext == ".cc" || ext == ".cxx";
+                })
+                .Select(i => MakeRelative(ProjectDirectory, i.FullPath)),
+                StringComparer.OrdinalIgnoreCase);
+            foreach (var compile in compileGroup.Elements(ns + "ClCompile").ToList())
+            {
+                var inc = (string)compile.Attribute("Include");
+                if (string.IsNullOrEmpty(inc) || !knownCompiles.Contains(inc))
+                {
+                    compile.Remove();
+                }
+            }
             var includeGroup = root.Elements(ns + "ItemGroup").FirstOrDefault(g => g.Elements(ns + "ClInclude").Any());
             if (includeGroup == null)
             {
@@ -592,6 +619,22 @@ namespace DevStudio.Projects
                 if (!includeGroup.Elements(ns + "ClInclude").Any(e => string.Equals((string)e.Attribute("Include"), rel, StringComparison.OrdinalIgnoreCase)))
                 {
                     includeGroup.Add(new XElement(ns + "ClInclude", new XAttribute("Include", rel)));
+                }
+            }
+            var knownIncludes = new HashSet<string>(
+                Items.Where(i =>
+                {
+                    var ext = Path.GetExtension(i.FullPath).ToLowerInvariant();
+                    return ext == ".h" || ext == ".hpp" || ext == ".hh" || ext == ".hxx";
+                })
+                .Select(i => MakeRelative(ProjectDirectory, i.FullPath)),
+                StringComparer.OrdinalIgnoreCase);
+            foreach (var include in includeGroup.Elements(ns + "ClInclude").ToList())
+            {
+                var inc = (string)include.Attribute("Include");
+                if (string.IsNullOrEmpty(inc) || !knownIncludes.Contains(inc))
+                {
+                    include.Remove();
                 }
             }
             doc.Save(FilePath);

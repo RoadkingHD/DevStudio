@@ -63,26 +63,7 @@ namespace DevStudio.UI
 
         private void SetupEditorTabCloseButtons()
         {
-            editorTabs.DrawMode = TabDrawMode.OwnerDrawFixed;
-            editorTabs.ItemSize = new Size(160, 22);
-            editorTabs.DrawItem += (s, e) =>
-            {
-                var page = editorTabs.TabPages[e.Index];
-                bool selected = editorTabs.SelectedIndex == e.Index;
-                using (var bg = new SolidBrush(selected ? UiTheme.Panel : UiTheme.Window))
-                {
-                    e.Graphics.FillRectangle(bg, e.Bounds);
-                }
-                var textRect = new Rectangle(e.Bounds.X + 6, e.Bounds.Y, e.Bounds.Width - 26, e.Bounds.Height);
-                TextRenderer.DrawText(e.Graphics, page.Text, Font, textRect, UiTheme.Text,
-                    TextFormatFlags.EndEllipsis | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
-                var closeRect = GetTabCloseRect(e.Bounds);
-                using (var pen = new Pen(UiTheme.Text, 1.4f))
-                {
-                    e.Graphics.DrawLine(pen, closeRect.Left + 3, closeRect.Top + 3, closeRect.Right - 3, closeRect.Bottom - 3);
-                    e.Graphics.DrawLine(pen, closeRect.Right - 3, closeRect.Top + 3, closeRect.Left + 3, closeRect.Bottom - 3);
-                }
-            };
+            UiTheme.EnableTabCloseButtons(editorTabs);
             editorTabs.MouseUp += (s, e) =>
             {
                 if (e.Button != MouseButtons.Left)
@@ -91,18 +72,33 @@ namespace DevStudio.UI
                 }
                 for (int i = 0; i < editorTabs.TabCount && i < _tabs.Count; i++)
                 {
-                    if (GetTabCloseRect(editorTabs.GetTabRect(i)).Contains(e.Location))
+                    if (UiTheme.TabCloseRect(editorTabs.GetTabRect(i)).Contains(e.Location))
                     {
                         CloseTab(_tabs[i]);
                         break;
                     }
                 }
             };
-        }
-
-        private static Rectangle GetTabCloseRect(Rectangle tabBounds)
-        {
-            return new Rectangle(tabBounds.Right - 18, tabBounds.Top + 5, 13, tabBounds.Height - 10);
+            var tabMenu = new ContextMenuStrip();
+            var closeItem = new ToolStripMenuItem("Close");
+            closeItem.Click += (s, e) =>
+            {
+                var page = tabMenu.SourceControl as TabPage;
+                if (page == null && editorTabs.SelectedTab != null)
+                {
+                    page = editorTabs.SelectedTab;
+                }
+                EditorTab tab;
+                if (page != null && _tabsByPath.TryGetValue(page.Name, out tab))
+                {
+                    CloseTab(tab);
+                }
+            };
+            var closeAllItem = new ToolStripMenuItem("Close All Documents");
+            closeAllItem.Click += (s, e) => CloseAllTabsClick(s, e);
+            tabMenu.Items.Add(closeItem);
+            tabMenu.Items.Add(closeAllItem);
+            editorTabs.ContextMenuStrip = tabMenu;
         }
 
         private void CloseAllTabsClick(object sender, EventArgs e)
@@ -246,6 +242,7 @@ namespace DevStudio.UI
             if (hasDesigner)
             {
                 var designer = new DesignerHostControl { Dock = DockStyle.Fill };
+                designer.DiagnosticOutput += message => outputPanel.AppendLine(message);
                 tab.Designer = designer;
                 tab.InnerTabs = new TabControl { Dock = DockStyle.Fill };
                 tab.CodePage = new TabPage("Code") { Name = "Code" };
@@ -605,7 +602,7 @@ namespace DevStudio.UI
             }
             statusLabel.Text = reason;
             outputPanel.AppendLine("Debugger stopped: " + reason);
-            if (!_debugger.IsStepping)
+            if (!info.IsStep)
             {
                 SelectBottomTab("CallStack");
             }
@@ -1191,6 +1188,10 @@ namespace DevStudio.UI
             }
             project.Items.Remove(item);
             project.Save();
+            if (project is CSharpProject)
+            {
+                WorkspaceManager.Instance.RemoveDocument(item.FullPath);
+            }
             solutionExplorer.RefreshProject(project);
             EditorTab tab;
             if (_tabsByPath.TryGetValue(item.FullPath, out tab))
