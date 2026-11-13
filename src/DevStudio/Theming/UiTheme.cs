@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace DevStudio.Theming
@@ -25,6 +26,21 @@ namespace DevStudio.Theming
             {
                 Apply(root);
                 root.Refresh();
+                var form = root as Form;
+                if (form != null)
+                {
+                    if (form.IsHandleCreated)
+                    {
+                        ApplyWindowTheme(form);
+                    }
+                    EventHandler onCreated = null;
+                    onCreated = (s, e) =>
+                    {
+                        form.HandleCreated -= onCreated;
+                        ApplyWindowTheme(form);
+                    };
+                    form.HandleCreated += onCreated;
+                }
             }
             ThemeChanged?.Invoke(null, EventArgs.Empty);
         }
@@ -35,6 +51,41 @@ namespace DevStudio.Theming
         public static Color Text => Current.Foreground;
         public static Color Accent => Current.IsDark ? Color.FromArgb(0, 122, 204) : Color.FromArgb(0, 120, 215);
         public static Color ToolWindow => Current.IsDark ? Color.FromArgb(30, 30, 30) : Color.FromArgb(245, 245, 245);
+        public static Color Background2 => Current.IsDark ? Color.FromArgb(45, 45, 48) : Color.FromArgb(245, 245, 245);
+
+        private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+        private const int DWMWA_USE_IMMERSIVE_DARK_MODE_PRE1903 = 19;
+        private const int DWMWA_CAPTION_COLOR = 35;
+        private const int DWMWA_TEXT_COLOR = 36;
+
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+
+        public static void ApplyWindowTheme(Form form)
+        {
+            if (form == null || !form.IsHandleCreated)
+            {
+                return;
+            }
+            try
+            {
+                int dark = Current.IsDark ? 1 : 0;
+                DwmSetWindowAttribute(form.Handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref dark, 4);
+                DwmSetWindowAttribute(form.Handle, DWMWA_USE_IMMERSIVE_DARK_MODE_PRE1903, ref dark, 4);
+                int caption = ToColorRef(Background2);
+                DwmSetWindowAttribute(form.Handle, DWMWA_CAPTION_COLOR, ref caption, 4);
+                int textColor = ToColorRef(Text);
+                DwmSetWindowAttribute(form.Handle, DWMWA_TEXT_COLOR, ref textColor, 4);
+            }
+            catch
+            {
+            }
+        }
+
+        private static int ToColorRef(Color color)
+        {
+            return color.R | (color.G << 8) | (color.B << 16);
+        }
 
         public static void Apply(Control root)
         {
@@ -50,6 +101,7 @@ namespace DevStudio.Theming
 
             if (control is TabControl tab)
             {
+                tab.BackColor = Background2;
                 tab.ForeColor = Text;
                 if (Current.IsDark || _closeButtonTabs.Contains(tab))
                 {

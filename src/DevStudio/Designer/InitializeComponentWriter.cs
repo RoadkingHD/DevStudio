@@ -52,8 +52,92 @@ namespace DevStudio.Designer
             }
             sb.Append(indent);
 
-            var newText = tree.GetText().WithChanges(new TextChange(new TextSpan(spanStart, spanEnd - spanStart), sb.ToString()));
-            return newText.ToString();
+            var text = tree.GetText();
+            var changes = new List<TextChange>
+            {
+                new TextChange(new TextSpan(spanStart, spanEnd - spanStart), sb.ToString())
+            };
+
+            var classDecl = method.Ancestors().OfType<ClassDeclarationSyntax>().FirstOrDefault();
+            if (classDecl != null)
+            {
+                CollectFieldChanges(classDecl, model, changes);
+            }
+
+            changes.Sort((a, b) => b.Span.Start.CompareTo(a.Span.Start));
+            var result = text;
+            foreach (var change in changes)
+            {
+                result = result.WithChanges(change);
+            }
+            return result.ToString();
+        }
+
+        private static void CollectFieldChanges(ClassDeclarationSyntax classDecl, DesignerModel model, List<TextChange> changes)
+        {
+            var modelNames = new HashSet<string>(
+                model.Controls.Values.Where(c => !c.IsRoot).Select(c => c.Name), StringComparer.Ordinal);
+
+            var fields = classDecl.Members.OfType<FieldDeclarationSyntax>()
+                .Where(f => f.Declaration != null)
+                .ToList();
+
+            foreach (var field in fields)
+            {
+                var typeText = field.Declaration.Type.ToString();
+                if (!typeText.StartsWith("System.Windows.Forms.", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+                bool stale = field.Declaration.Variables.Any(v => !modelNames.Contains(v.Identifier.ValueText));
+                if (stale)
+                {
+                    changes.Add(new TextChange(field.FullSpan, string.Empty));
+                }
+            }
+
+            var existingNames = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var field in fields)
+            {
+                foreach (var variable in field.Declaration.Variables)
+                {
+                    existingNames.Add(variable.Identifier.ValueText);
+                }
+            }
+            var missing = model.Controls.Values
+                .Where(c => !c.IsRoot && !existingNames.Contains(c.Name))
+                .ToList();
+            if (missing.Count > 0)
+            {
+                var memberIndent = GetMemberIndent(classDecl);
+                var sb = new System.Text.StringBuilder();
+                foreach (var control in missing)
+                {
+                    sb.Append(memberIndent)
+                        .Append("private ")
+                        .Append(control.TypeName)
+                        .Append(' ')
+                        .Append(control.Name)
+                        .Append(";\r\n");
+                }
+                changes.Add(new TextChange(new TextSpan(classDecl.CloseBraceToken.FullSpan.Start, 0), sb.ToString()));
+            }
+        }
+
+        private static string GetMemberIndent(ClassDeclarationSyntax classDecl)
+        {
+            foreach (var member in classDecl.Members)
+            {
+                var lineText = classDecl.SyntaxTree.GetText().Lines
+                    .GetLineFromPosition(member.SpanStart).ToString();
+                int index = 0;
+                while (index < lineText.Length && (lineText[index] == ' ' || lineText[index] == '\t'))
+                {
+                    index++;
+                }
+                return lineText.Substring(0, index);
+            }
+            return "        ";
         }
 
         private static List<string> GenerateBody(DesignerModel model)
