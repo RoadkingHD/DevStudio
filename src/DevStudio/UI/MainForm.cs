@@ -257,7 +257,8 @@ namespace DevStudio.UI
                 tab.InnerTabs.TabPages.Add(tab.DesignerPage);
                 page.Controls.Add(tab.InnerTabs);
                 designer.SourceChanged += text => WriteDesignerSource(designerPath, text);
-                designer.EventHandlerNeeded += (handlerName, className) => InsertEventHandlerMethod(path, designerPath, handlerName, className);
+                var eventTargetPath = designerPath != path ? path : DeriveMainSourcePath(path);
+                designer.EventHandlerNeeded += (handlerName, className) => InsertEventHandlerMethod(eventTargetPath, designerPath, handlerName, className);
                 designer.ViewCodeRequested += () => { tab.InnerTabs.SelectedTab = tab.CodePage; };
                 tab.InnerTabs.SelectedIndexChanged += (s, e) =>
                 {
@@ -305,6 +306,21 @@ namespace DevStudio.UI
             return source.IndexOf("void InitializeComponent", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
+        private static string DeriveMainSourcePath(string designerPath)
+        {
+            var fileName = Path.GetFileNameWithoutExtension(designerPath);
+            if (fileName.EndsWith(".Designer", StringComparison.OrdinalIgnoreCase))
+            {
+                var candidate = Path.Combine(Path.GetDirectoryName(designerPath),
+                    fileName.Substring(0, fileName.Length - ".Designer".Length) + ".cs");
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+            return designerPath;
+        }
+
         private string GetDesignerSource(string designerPath)
         {
             EditorTab designerTab;
@@ -318,13 +334,9 @@ namespace DevStudio.UI
         private void WriteDesignerSource(string designerPath, string text)
         {
             EditorTab designerTab;
-            if (_tabsByPath.TryGetValue(designerPath, out designerTab))
+            if (_tabsByPath.TryGetValue(designerPath, out designerTab) && designerTab.Editor.GetText() != text)
             {
-                if (designerTab.Editor.GetText() != text)
-                {
-                    designerTab.Editor.SetText(text);
-                }
-                return;
+                designerTab.Editor.SetText(text);
             }
             if (!File.Exists(designerPath) || File.ReadAllText(designerPath) != text)
             {
@@ -335,15 +347,29 @@ namespace DevStudio.UI
 
         private void InsertEventHandlerMethod(string mainPath, string designerPath, string handlerName, string className)
         {
-            EditorTab mainTab;
-            if (_tabsByPath.TryGetValue(mainPath, out mainTab) && mainPath != designerPath)
+            if (mainPath != designerPath)
             {
-                var updated = InitializeComponentWriter.EnsureEventHandlerMethod(mainTab.Doc.Text, handlerName, className);
-                if (updated != mainTab.Doc.Text)
+                EditorTab mainTab;
+                if (_tabsByPath.TryGetValue(mainPath, out mainTab))
                 {
-                    mainTab.Editor.SetText(updated);
+                    var updated = InitializeComponentWriter.EnsureEventHandlerMethod(mainTab.Doc.Text, handlerName, className);
+                    if (updated != mainTab.Doc.Text)
+                    {
+                        mainTab.Editor.SetText(updated);
+                    }
+                    return;
                 }
-                return;
+                if (File.Exists(mainPath))
+                {
+                    var text = File.ReadAllText(mainPath);
+                    var updatedFromDisk = InitializeComponentWriter.EnsureEventHandlerMethod(text, handlerName, className);
+                    if (updatedFromDisk != text)
+                    {
+                        File.WriteAllText(mainPath, updatedFromDisk);
+                        WorkspaceManager.Instance.AddOrUpdateDocument(mainPath, updatedFromDisk);
+                    }
+                    return;
+                }
             }
             var designerText = GetDesignerSource(designerPath);
             var updatedDesigner = InitializeComponentWriter.EnsureEventHandlerMethod(designerText, handlerName);

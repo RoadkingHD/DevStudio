@@ -804,11 +804,23 @@ namespace DevStudio.Designer
             {
                 return;
             }
+            if (property == "BackColor" && value is Color)
+            {
+                var visualStyleProperty = control.GetType().GetProperty("UseVisualStyleBackColor");
+                if (visualStyleProperty != null && visualStyleProperty.CanWrite &&
+                    true.Equals(visualStyleProperty.GetValue(control, null)))
+                {
+                    visualStyleProperty.SetValue(control, false, null);
+                    info.Properties["UseVisualStyleBackColor"] = "false";
+                }
+            }
             var propertyInfo = control.GetType().GetProperty(property);
             var type = propertyInfo != null ? propertyInfo.PropertyType : null;
             var expression = DesignerExpressionEvaluator.ToSourceExpression(value, type);
             if (expression == null)
             {
+                RaiseDiagnostic("Designer: property '" + property + "' of type '" +
+                    (type != null ? type.Name : "?") + "' cannot be serialized and was skipped.");
                 return;
             }
             info.Properties[property] = expression;

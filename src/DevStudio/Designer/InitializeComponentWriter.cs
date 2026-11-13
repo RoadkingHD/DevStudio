@@ -336,10 +336,80 @@ namespace DevStudio.Designer
                 if (targetType == typeof(Font))
                 {
                     var match = System.Text.RegularExpressions.Regex.Match(
-                        expr, @"new\s+(System\.Drawing\.)?Font\s*\(\s*""(?<name>[^""]+)""\s*,\s*(?<size>[\d.]+)");
+                        expr, @"new\s+(System\.Drawing\.)?Font\s*\(\s*""(?<name>[^""]+)""\s*,\s*(?<size>[\d.]+)\s*F?");
                     if (match.Success)
                     {
-                        return new Font(match.Groups["name"].Value, float.Parse(match.Groups["size"].Value));
+                        var style = FontStyle.Regular;
+                        foreach (System.Text.RegularExpressions.Match styleMatch in
+                            System.Text.RegularExpressions.Regex.Matches(expr, @"FontStyle\.(?<name>\w+)"))
+                        {
+                            FontStyle parsed;
+                            if (Enum.TryParse(styleMatch.Groups["name"].Value, out parsed))
+                            {
+                                style |= parsed;
+                            }
+                        }
+                        return new Font(match.Groups["name"].Value,
+                            float.Parse(match.Groups["size"].Value, System.Globalization.CultureInfo.InvariantCulture), style);
+                    }
+                }
+
+                if (targetType != null && targetType.FullName == "System.Windows.Forms.Padding")
+                {
+                    var match = System.Text.RegularExpressions.Regex.Match(
+                        expr, @"new\s+(System\.Windows\.Forms\.)?Padding\s*\((?<args>[^()]*)\)");
+                    if (match.Success)
+                    {
+                        var numbers = System.Text.RegularExpressions.Regex.Matches(match.Groups["args"].Value, @"-?\d+")
+                            .Cast<System.Text.RegularExpressions.Match>()
+                            .Select(m => int.Parse(m.Value, System.Globalization.CultureInfo.InvariantCulture))
+                            .ToList();
+                        if (numbers.Count >= 4)
+                        {
+                            return Activator.CreateInstance(targetType, numbers[0], numbers[1], numbers[2], numbers[3]);
+                        }
+                        if (numbers.Count == 1)
+                        {
+                            return Activator.CreateInstance(targetType, numbers[0]);
+                        }
+                    }
+                }
+
+                if (targetType == typeof(SizeF))
+                {
+                    var match = System.Text.RegularExpressions.Regex.Match(
+                        expr, @"new\s+(System\.Drawing\.)?SizeF?\s*\(\s*(?<w>-?[\d.]+)\s*F?\s*,\s*(?<h>-?[\d.]+)\s*F?\s*\)");
+                    if (match.Success)
+                    {
+                        return new SizeF(
+                            float.Parse(match.Groups["w"].Value, System.Globalization.CultureInfo.InvariantCulture),
+                            float.Parse(match.Groups["h"].Value, System.Globalization.CultureInfo.InvariantCulture));
+                    }
+                }
+
+                if (targetType == typeof(DateTime))
+                {
+                    var match = System.Text.RegularExpressions.Regex.Match(
+                        expr, @"new\s+(System\.)?DateTime\s*\((?<args>[^()]*)\)");
+                    if (match.Success)
+                    {
+                        var numbers = System.Text.RegularExpressions.Regex.Matches(match.Groups["args"].Value, @"-?\d+")
+                            .Cast<System.Text.RegularExpressions.Match>()
+                            .Select(m => long.Parse(m.Value, System.Globalization.CultureInfo.InvariantCulture))
+                            .ToList();
+                        if (numbers.Count == 1)
+                        {
+                            return new DateTime(numbers[0]);
+                        }
+                        if (numbers.Count >= 3)
+                        {
+                            return new DateTime(
+                                (int)numbers[0], (int)numbers[1], (int)numbers[2],
+                                numbers.Count >= 4 ? (int)numbers[3] : 0,
+                                numbers.Count >= 5 ? (int)numbers[4] : 0,
+                                numbers.Count >= 6 ? (int)numbers[5] : 0,
+                                numbers.Count >= 7 ? (int)numbers[6] : 0);
+                        }
                     }
                 }
 
@@ -405,20 +475,25 @@ namespace DevStudio.Designer
 
                 if (targetType != null && targetType.IsEnum)
                 {
-                    var parts = expr.Split(new[] { '|' }, StringSplitOptions.RemoveEmptyEntries)
-                        .Select(p =>
-                        {
-                            var name = p.Trim();
-                            var dot = name.LastIndexOf('.');
-                            return dot >= 0 ? name.Substring(dot + 1) : name;
-                        });
                     object combined = null;
-                    foreach (var part in parts)
+                    foreach (System.Text.RegularExpressions.Match m in
+                        System.Text.RegularExpressions.Regex.Matches(expr, @"[A-Za-z_]\w*"))
                     {
-                        var value = Enum.Parse(targetType, part.Trim());
+                        object value;
+                        try
+                        {
+                            value = Enum.Parse(targetType, m.Value, true);
+                        }
+                        catch
+                        {
+                            continue;
+                        }
                         combined = combined == null ? value : Enum.ToObject(targetType, Convert.ToInt64(combined) | Convert.ToInt64(value));
                     }
-                    return combined;
+                    if (combined != null)
+                    {
+                        return combined;
+                    }
                 }
 
                 if (targetType == typeof(bool))
@@ -433,9 +508,22 @@ namespace DevStudio.Designer
                 {
                     if (expr.StartsWith("\"") && expr.EndsWith("\"") && expr.Length >= 2)
                     {
-                        return expr.Substring(1, expr.Length - 2);
+                        return UnescapeSourceString(expr.Substring(1, expr.Length - 2));
                     }
                     return expr;
+                }
+
+                if (targetType == typeof(char))
+                {
+                    var match = System.Text.RegularExpressions.Regex.Match(expr, @"'(?<ch>(?:[^'\\]|\\.))'");
+                    if (match.Success)
+                    {
+                        var text = UnescapeSourceString(match.Groups["ch"].Value);
+                        if (text.Length == 1)
+                        {
+                            return text[0];
+                        }
+                    }
                 }
 
                 if (targetType == typeof(string[]))
@@ -529,12 +617,27 @@ namespace DevStudio.Designer
             }
             if (value is string)
             {
-                return "\"" + value + "\"";
+                return QuoteSourceString((string)value);
             }
             if (value is string[])
             {
                 var strings = (string[])value;
                 return "new string[] { " + string.Join(", ", strings.Select(QuoteSourceString)) + " }";
+            }
+            if (value is DateTime)
+            {
+                var dt = (DateTime)value;
+                return "new System.DateTime(" + dt.Year + ", " + dt.Month + ", " + dt.Day + ", "
+                    + dt.Hour + ", " + dt.Minute + ", " + dt.Second + ")";
+            }
+            if (value is char)
+            {
+                var ch = (char)value;
+                if (ch == '\'' || ch == '\\')
+                {
+                    return null;
+                }
+                return "'" + ch + "'";
             }
             if (value is float)
             {
