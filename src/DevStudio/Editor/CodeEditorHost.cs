@@ -43,6 +43,8 @@ namespace DevStudio.Editor
         private TextStyle _semanticMethodStyle;
         private TextStyle _semanticFieldStyle;
         private TextStyle _semanticVariableStyle;
+        private TextStyle _operatorStyle;
+        private TextStyle _punctuationStyle;
         private TextStyle _debugStyle;
         private int _debugLine = -1;
         private EditorTheme _theme;
@@ -244,6 +246,8 @@ namespace DevStudio.Editor
             _semanticMethodStyle = new TextStyle(BrushOf(theme.MethodName), null, FontStyle.Regular);
             _semanticFieldStyle = new TextStyle(BrushOf(theme.FieldName), null, FontStyle.Regular);
             _semanticVariableStyle = new TextStyle(BrushOf(theme.VariableName), null, FontStyle.Regular);
+            _operatorStyle = new TextStyle(BrushOf(theme.Operator), null, FontStyle.Regular);
+            _punctuationStyle = new TextStyle(BrushOf(theme.Punctuation), null, FontStyle.Regular);
 
             _debugStyle = new TextStyle(null, new SolidBrush(DebugHighlightColor(theme)), FontStyle.Bold);
 
@@ -568,7 +572,7 @@ namespace DevStudio.Editor
                 {
                     return;
                 }
-                _tb.Range.ClearStyle(new Style[] { _semanticTypeStyle, _semanticInterfaceStyle, _semanticMethodStyle, _semanticFieldStyle, _semanticVariableStyle, _controlKeywordStyle });
+                _tb.Range.ClearStyle(new Style[] { _semanticTypeStyle, _semanticInterfaceStyle, _semanticMethodStyle, _semanticFieldStyle, _semanticVariableStyle, _controlKeywordStyle, _operatorStyle, _punctuationStyle });
                 foreach (var span in spans)
                 {
                     var style = MapClassification(span);
@@ -592,23 +596,36 @@ namespace DevStudio.Editor
         {
             switch (span.ClassificationType)
             {
-                case "ControlKeyword": return _controlKeywordStyle;
-                case "ClassName":
-                case "RecordClassName":
-                case "StructName":
-                case "EnumName":
-                case "DelegateName":
-                case "TypeName": return _semanticTypeStyle;
-                case "InterfaceName": return _semanticInterfaceStyle;
-                case "MethodName":
-                case "ExtensionMethodName": return _semanticMethodStyle;
-                case "FieldName":
-                case "PropertyName":
-                case "EventName":
-                case "ConstantName": return _semanticFieldStyle;
-                case "LocalName":
-                case "ParameterName":
-                case "RangeVariableName": return _semanticVariableStyle;
+                case ClassificationTypeNames.ControlKeyword: return _controlKeywordStyle;
+                case ClassificationTypeNames.ClassName:
+                case ClassificationTypeNames.RecordClassName:
+                case ClassificationTypeNames.StructName:
+                case ClassificationTypeNames.EnumName:
+                case ClassificationTypeNames.DelegateName:
+                case ClassificationTypeNames.NamespaceName: return _semanticTypeStyle;
+                case ClassificationTypeNames.InterfaceName: return _semanticInterfaceStyle;
+                case ClassificationTypeNames.MethodName:
+                case ClassificationTypeNames.ExtensionMethodName: return _semanticMethodStyle;
+                case ClassificationTypeNames.FieldName:
+                case ClassificationTypeNames.PropertyName:
+                case ClassificationTypeNames.EventName:
+                case ClassificationTypeNames.EnumMemberName: return _semanticFieldStyle;
+                case ClassificationTypeNames.ConstantName: return _numberStyle;
+                case ClassificationTypeNames.LocalName:
+                case ClassificationTypeNames.ParameterName:
+                case "range variable name": return _semanticVariableStyle;
+                case ClassificationTypeNames.Keyword: return _keywordStyle;
+                case ClassificationTypeNames.Operator:
+                case ClassificationTypeNames.OperatorOverloaded: return _operatorStyle;
+                case ClassificationTypeNames.Punctuation: return _punctuationStyle;
+                case ClassificationTypeNames.NumericLiteral: return _numberStyle;
+                case ClassificationTypeNames.StringLiteral:
+                case ClassificationTypeNames.VerbatimStringLiteral:
+                case "interpolated string text": return _stringStyle;
+                case ClassificationTypeNames.Comment: return _commentStyle;
+                case ClassificationTypeNames.XmlDocCommentText:
+                case ClassificationTypeNames.XmlDocCommentName:
+                case ClassificationTypeNames.XmlDocCommentDelimiter: return _docCommentStyle;
                 default: return null;
             }
         }

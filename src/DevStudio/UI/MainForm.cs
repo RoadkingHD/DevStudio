@@ -1436,10 +1436,22 @@ namespace DevStudio.UI
         private void SetupSnippetMenu()
         {
             var snippetMenu = new ToolStripMenuItem("Insert Snippet");
-            var csharpItem = new ToolStripMenuItem("Run as Administrator (C#)", null, (s, e) => InsertSnippet(CSharpElevateSnippet));
-            var cppItem = new ToolStripMenuItem("Run as Administrator (C++)", null, (s, e) => InsertSnippet(CppElevateSnippet));
-            snippetMenu.DropDownItems.Add(csharpItem);
-            snippetMenu.DropDownItems.Add(cppItem);
+
+            var cmdMenu = new ToolStripMenuItem("Start cmd.exe");
+            cmdMenu.DropDownItems.Add(new ToolStripMenuItem("C#", null, (s, e) => InsertSnippet(CSharpCmdSnippet)));
+            cmdMenu.DropDownItems.Add(new ToolStripMenuItem("C++", null, (s, e) => InsertSnippet(CppCmdSnippet)));
+
+            var shellMenu = new ToolStripMenuItem("Start Shell");
+            shellMenu.DropDownItems.Add(new ToolStripMenuItem("C#", null, (s, e) => InsertSnippet(CSharpShellSnippet)));
+            shellMenu.DropDownItems.Add(new ToolStripMenuItem("C++", null, (s, e) => InsertSnippet(CppShellSnippet)));
+
+            var elevateMenu = new ToolStripMenuItem("Run as Administrator");
+            elevateMenu.DropDownItems.Add(new ToolStripMenuItem("C#", null, (s, e) => InsertSnippet(CSharpElevateSnippet)));
+            elevateMenu.DropDownItems.Add(new ToolStripMenuItem("C++", null, (s, e) => InsertSnippet(CppElevateSnippet)));
+
+            snippetMenu.DropDownItems.Add(cmdMenu);
+            snippetMenu.DropDownItems.Add(shellMenu);
+            snippetMenu.DropDownItems.Add(elevateMenu);
             editMenu.DropDownItems.Insert(0, snippetMenu);
             editMenu.DropDownItems.Insert(1, new ToolStripSeparator());
         }
@@ -1453,6 +1465,26 @@ namespace DevStudio.UI
             }
             tab.Editor.InsertAtCaret(snippet);
         }
+
+        private const string CSharpCmdSnippet =
+            "System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo\r\n" +
+            "{\r\n" +
+            "    FileName = \"cmd.exe\",\r\n" +
+            "    UseShellExecute = true\r\n" +
+            "});";
+
+        private const string CppCmdSnippet =
+            "ShellExecute(NULL, TEXT(\"open\"), TEXT(\"cmd.exe\"), NULL, NULL, SW_SHOW);";
+
+        private const string CSharpShellSnippet =
+            "System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo\r\n" +
+            "{\r\n" +
+            "    FileName = \"powershell.exe\",\r\n" +
+            "    UseShellExecute = true\r\n" +
+            "});";
+
+        private const string CppShellSnippet =
+            "ShellExecute(NULL, TEXT(\"open\"), TEXT(\"powershell.exe\"), NULL, NULL, SW_SHOW);";
 
         private const string CSharpElevateSnippet =
             "var startInfo = new System.Diagnostics.ProcessStartInfo\r\n" +

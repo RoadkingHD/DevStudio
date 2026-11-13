@@ -103,14 +103,32 @@ namespace DevStudio.Theming
                 Color.FromArgb(43, 145, 175), Color.FromArgb(121, 94, 38), Color.FromArgb(0, 16, 128), Color.FromArgb(0, 16, 128),
                 Color.FromArgb(0, 128, 0), Color.FromArgb(220, 220, 220));
 
-        public static readonly EditorTheme Blue =
-            new EditorTheme("Blue", false,
-                Color.White, Color.Black, Color.FromArgb(0, 120, 215), Color.FromArgb(235, 242, 252),
-                Color.FromArgb(35, 110, 170), Color.Black,
-                Color.FromArgb(0, 0, 255), Color.FromArgb(0, 0, 255), Color.FromArgb(0, 128, 0), Color.FromArgb(162, 21, 21), Color.FromArgb(9, 134, 88),
-                Color.FromArgb(43, 145, 175), Color.Black, Color.FromArgb(128, 0, 128), Color.Black, Color.Black,
-                Color.FromArgb(43, 145, 175), Color.FromArgb(121, 94, 38), Color.FromArgb(0, 16, 128), Color.FromArgb(0, 16, 128),
-                Color.FromArgb(0, 128, 0), Color.FromArgb(227, 236, 250));
+        public static readonly EditorTheme Monokai =
+            new EditorTheme("Monokai", true,
+                Color.FromArgb(39, 40, 34), Color.FromArgb(248, 248, 242), Color.FromArgb(73, 72, 62), Color.FromArgb(62, 61, 50),
+                Color.FromArgb(117, 113, 94), Color.FromArgb(248, 248, 242),
+                Color.FromArgb(249, 38, 114), Color.FromArgb(249, 38, 114), Color.FromArgb(117, 113, 94), Color.FromArgb(230, 219, 116), Color.FromArgb(174, 129, 255),
+                Color.FromArgb(102, 217, 239), Color.FromArgb(248, 248, 242), Color.FromArgb(249, 38, 114), Color.FromArgb(248, 248, 242), Color.FromArgb(249, 38, 114),
+                Color.FromArgb(166, 226, 46), Color.FromArgb(166, 226, 46), Color.FromArgb(248, 248, 242), Color.FromArgb(253, 151, 31),
+                Color.FromArgb(117, 113, 94), Color.FromArgb(62, 61, 50));
+
+        public static readonly EditorTheme Dracula =
+            new EditorTheme("Dracula", true,
+                Color.FromArgb(40, 42, 54), Color.FromArgb(248, 248, 242), Color.FromArgb(68, 71, 90), Color.FromArgb(52, 55, 70),
+                Color.FromArgb(98, 114, 164), Color.FromArgb(248, 248, 242),
+                Color.FromArgb(255, 121, 198), Color.FromArgb(255, 121, 198), Color.FromArgb(98, 114, 164), Color.FromArgb(241, 250, 140), Color.FromArgb(189, 147, 249),
+                Color.FromArgb(139, 233, 253), Color.FromArgb(248, 248, 242), Color.FromArgb(255, 121, 198), Color.FromArgb(248, 248, 242), Color.FromArgb(255, 121, 198),
+                Color.FromArgb(139, 233, 253), Color.FromArgb(80, 250, 123), Color.FromArgb(139, 233, 253), Color.FromArgb(248, 248, 242),
+                Color.FromArgb(98, 114, 164), Color.FromArgb(59, 61, 77));
+
+        public static readonly EditorTheme OneDark =
+            new EditorTheme("One Dark", true,
+                Color.FromArgb(40, 44, 52), Color.FromArgb(171, 178, 191), Color.FromArgb(62, 68, 81), Color.FromArgb(44, 49, 60),
+                Color.FromArgb(92, 99, 112), Color.FromArgb(171, 178, 191),
+                Color.FromArgb(198, 120, 221), Color.FromArgb(198, 120, 221), Color.FromArgb(92, 99, 112), Color.FromArgb(152, 195, 121), Color.FromArgb(209, 154, 102),
+                Color.FromArgb(229, 192, 123), Color.FromArgb(171, 178, 191), Color.FromArgb(198, 120, 221), Color.FromArgb(171, 178, 191), Color.FromArgb(86, 182, 194),
+                Color.FromArgb(229, 192, 123), Color.FromArgb(97, 175, 239), Color.FromArgb(224, 108, 117), Color.FromArgb(224, 108, 117),
+                Color.FromArgb(92, 99, 112), Color.FromArgb(58, 63, 75));
 
         public static readonly EditorTheme SolarizedDark =
             new EditorTheme("Solarized Dark", true,
@@ -123,7 +141,7 @@ namespace DevStudio.Theming
 
         public static readonly IReadOnlyList<EditorTheme> All = new[]
         {
-            Dark, Light, Blue, SolarizedDark
+            Dark, Light, Monokai, Dracula, OneDark, SolarizedDark
         };
 
         public override string ToString()
