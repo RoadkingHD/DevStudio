@@ -11,16 +11,34 @@ namespace DevStudio.Designer
     /// dragging and property editing, and pushes changes back to the model.</summary>
     public sealed class DesignSurface : Panel
     {
+        private enum ResizeHandle
+        {
+            None,
+            N,
+            S,
+            E,
+            W,
+            NW,
+            NE,
+            SW,
+            SE
+        }
+
+        private const int HandleSize = 8;
+        private const int GrabMargin = 5;
+
         private DesignerModel _model;
         private Control _selected;
         private Control _rootControl;
         private bool _dragging;
         private Point _dragStart;
         private Rectangle _dragStartBounds;
+        private ResizeHandle _resizing = ResizeHandle.None;
 
         public event Action ModelChanged;
         public event Action<Control> SelectionChanged;
         public event Action<string> Diagnostic;
+        public event Action<Control> DefaultEventRequested;
 
         public DesignSurface()
         {
@@ -113,6 +131,8 @@ namespace DevStudio.Designer
             _rootControl.Location = new Point(0, 0);
             _rootControl.Tag = "this";
             WireEvents(_rootControl);
+            Location = new Point(12, 12);
+            Size = new Size(width + 24, height + 24);
 
             foreach (var control in model.Controls.Values.Where(c => !c.IsRoot))
             {
@@ -264,6 +284,7 @@ namespace DevStudio.Designer
             control.MouseDown += OnControlMouseDown;
             control.MouseMove += OnControlMouseMove;
             control.MouseUp += OnControlMouseUp;
+            control.MouseLeave += OnControlMouseLeave;
             control.Paint += OnControlPaint;
         }
 
@@ -271,6 +292,21 @@ namespace DevStudio.Designer
         {
             var control = (Control)sender;
             Select(control);
+            if (e.Clicks >= 2)
+            {
+                DefaultEventRequested?.Invoke(control);
+                return;
+            }
+            var handle = GetHandleAt(control.ClientRectangle, e.Location);
+            if (handle != ResizeHandle.None)
+            {
+                _resizing = handle;
+                _dragging = false;
+                _dragStart = control.PointToScreen(e.Location);
+                _dragStartBounds = control.Bounds;
+                control.Capture = true;
+                return;
+            }
             if (ReferenceEquals(control, _rootControl))
             {
                 return;
@@ -283,22 +319,52 @@ namespace DevStudio.Designer
 
         private void OnControlMouseMove(object sender, MouseEventArgs e)
         {
-            if (!_dragging || _selected == null)
+            var control = (Control)sender;
+            if (_resizing != ResizeHandle.None && _selected != null)
+            {
+                var screen = control.PointToScreen(e.Location);
+                var delta = new Point(screen.X - _dragStart.X, screen.Y - _dragStart.Y);
+                ApplyResize(delta);
+                return;
+            }
+            if (_dragging && _selected != null)
+            {
+                var screen = control.PointToScreen(e.Location);
+                var delta = new Point(screen.X - _dragStart.X, screen.Y - _dragStart.Y);
+                _selected.Bounds = new Rectangle(
+                    Math.Max(0, _dragStartBounds.X + delta.X),
+                    Math.Max(0, _dragStartBounds.Y + delta.Y),
+                    _dragStartBounds.Width,
+                    _dragStartBounds.Height);
+                return;
+            }
+            if (ReferenceEquals(control, _selected))
+            {
+                control.Cursor = GetCursor(GetHandleAt(control.ClientRectangle, e.Location));
+            }
+        }
+
+        private void OnControlMouseLeave(object sender, EventArgs e)
+        {
+            if (_dragging || _resizing != ResizeHandle.None)
             {
                 return;
             }
-            var control = (Control)sender;
-            var screen = control.PointToScreen(e.Location);
-            var delta = new Point(screen.X - _dragStart.X, screen.Y - _dragStart.Y);
-            _selected.Bounds = new Rectangle(
-                Math.Max(0, _dragStartBounds.X + delta.X),
-                Math.Max(0, _dragStartBounds.Y + delta.Y),
-                _dragStartBounds.Width,
-                _dragStartBounds.Height);
+            ((Control)sender).Cursor = null;
         }
 
         private void OnControlMouseUp(object sender, MouseEventArgs e)
         {
+            if (_resizing != ResizeHandle.None && _selected != null)
+            {
+                _resizing = ResizeHandle.None;
+                var resized = (Control)sender;
+                resized.Capture = false;
+                resized.Cursor = null;
+                UpdateModelFromControl(_selected);
+                SelectionChanged?.Invoke(_selected);
+                return;
+            }
             if (_dragging && _selected != null)
             {
                 _dragging = false;
@@ -306,6 +372,106 @@ namespace DevStudio.Designer
                 UpdateModelFromControl(_selected);
                 SelectionChanged?.Invoke(_selected);
             }
+        }
+
+        private static ResizeHandle GetHandleAt(Rectangle bounds, Point p)
+        {
+            bool left = Math.Abs(p.X - bounds.Left) <= GrabMargin;
+            bool right = Math.Abs(p.X - bounds.Right) <= GrabMargin;
+            bool top = Math.Abs(p.Y - bounds.Top) <= GrabMargin;
+            bool bottom = Math.Abs(p.Y - bounds.Bottom) <= GrabMargin;
+            bool middleX = p.X > bounds.Left + GrabMargin && p.X < bounds.Right - GrabMargin;
+            bool middleY = p.Y > bounds.Top + GrabMargin && p.Y < bounds.Bottom - GrabMargin;
+            if (left && top)
+            {
+                return ResizeHandle.NW;
+            }
+            if (right && top)
+            {
+                return ResizeHandle.NE;
+            }
+            if (left && bottom)
+            {
+                return ResizeHandle.SW;
+            }
+            if (right && bottom)
+            {
+                return ResizeHandle.SE;
+            }
+            if (left && middleY)
+            {
+                return ResizeHandle.W;
+            }
+            if (right && middleY)
+            {
+                return ResizeHandle.E;
+            }
+            if (top && middleX)
+            {
+                return ResizeHandle.N;
+            }
+            if (bottom && middleX)
+            {
+                return ResizeHandle.S;
+            }
+            return ResizeHandle.None;
+        }
+
+        private static Cursor GetCursor(ResizeHandle handle)
+        {
+            switch (handle)
+            {
+                case ResizeHandle.N:
+                case ResizeHandle.S:
+                    return Cursors.SizeNS;
+                case ResizeHandle.E:
+                case ResizeHandle.W:
+                    return Cursors.SizeWE;
+                case ResizeHandle.NW:
+                case ResizeHandle.SE:
+                    return Cursors.SizeNWSE;
+                case ResizeHandle.NE:
+                case ResizeHandle.SW:
+                    return Cursors.SizeNESW;
+                default:
+                    return null;
+            }
+        }
+
+        private void ApplyResize(Point delta)
+        {
+            var bounds = _dragStartBounds;
+            int left = bounds.Left;
+            int top = bounds.Top;
+            int right = bounds.Right;
+            int bottom = bounds.Bottom;
+            switch (_resizing)
+            {
+                case ResizeHandle.NW:
+                case ResizeHandle.W:
+                case ResizeHandle.SW:
+                    left = Math.Max(0, bounds.Left + delta.X);
+                    break;
+                case ResizeHandle.NE:
+                case ResizeHandle.E:
+                case ResizeHandle.SE:
+                    right = Math.Max(left + 10, bounds.Right + delta.X);
+                    break;
+            }
+            switch (_resizing)
+            {
+                case ResizeHandle.NW:
+                case ResizeHandle.N:
+                case ResizeHandle.NE:
+                    top = Math.Max(0, bounds.Top + delta.Y);
+                    break;
+                case ResizeHandle.SW:
+                case ResizeHandle.S:
+                case ResizeHandle.SE:
+                    bottom = Math.Max(top + 10, bounds.Bottom + delta.Y);
+                    break;
+            }
+            _selected.Bounds = new Rectangle(left, top, right - left, bottom - top);
         }
 
         private void OnControlPaint(object sender, PaintEventArgs e)
@@ -317,6 +483,37 @@ namespace DevStudio.Designer
                 {
                     e.Graphics.DrawRectangle(pen, 0, 0, control.Width - 1, control.Height - 1);
                 }
+                foreach (var rect in GetHandleRects(control.ClientRectangle))
+                {
+                    using (var brush = new SolidBrush(Color.White))
+                    {
+                        e.Graphics.FillRectangle(brush, rect);
+                    }
+                    using (var pen = new Pen(Color.Black))
+                    {
+                        e.Graphics.DrawRectangle(pen, rect.Left, rect.Top, rect.Width - 1, rect.Height - 1);
+                    }
+                }
+            }
+        }
+
+        private static IEnumerable<Rectangle> GetHandleRects(Rectangle bounds)
+        {
+            var half = HandleSize / 2;
+            var points = new[]
+            {
+                new Point(bounds.Left, bounds.Top),
+                new Point(bounds.Left + bounds.Width / 2, bounds.Top),
+                new Point(bounds.Right, bounds.Top),
+                new Point(bounds.Left, bounds.Top + bounds.Height / 2),
+                new Point(bounds.Right, bounds.Top + bounds.Height / 2),
+                new Point(bounds.Left, bounds.Bottom),
+                new Point(bounds.Left + bounds.Width / 2, bounds.Bottom),
+                new Point(bounds.Right, bounds.Bottom)
+            };
+            foreach (var point in points)
+            {
+                yield return new Rectangle(point.X - half, point.Y - half, HandleSize, HandleSize);
             }
         }
 
@@ -365,8 +562,17 @@ namespace DevStudio.Designer
             {
                 return;
             }
-            info.Properties["Location"] = DesignerExpressionEvaluator.ToSourceExpression(control.Location, typeof(Point));
-            info.Properties["Size"] = DesignerExpressionEvaluator.ToSourceExpression(control.Size, typeof(Size));
+            if (info.IsRoot)
+            {
+                info.Properties["ClientSize"] = DesignerExpressionEvaluator.ToSourceExpression(control.ClientSize, typeof(Size));
+                info.Properties.Remove("Size");
+                info.Properties.Remove("Location");
+            }
+            else
+            {
+                info.Properties["Location"] = DesignerExpressionEvaluator.ToSourceExpression(control.Location, typeof(Point));
+                info.Properties["Size"] = DesignerExpressionEvaluator.ToSourceExpression(control.Size, typeof(Size));
+            }
             ModelChanged?.Invoke();
         }
     }

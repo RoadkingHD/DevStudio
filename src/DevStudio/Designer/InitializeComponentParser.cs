@@ -13,6 +13,7 @@ namespace DevStudio.Designer
         public string TypeName { get; set; }
         public bool IsRoot { get; set; }
         public OrderedProperties Properties { get; } = new OrderedProperties();
+        public OrderedProperties Events { get; } = new OrderedProperties();
         public List<string> Children { get; } = new List<string>();
     }
 
@@ -64,6 +65,7 @@ namespace DevStudio.Designer
         public string RootTypeName { get; set; } = "System.Windows.Forms.Form";
         public ControlInfo Root { get; set; }
         public Dictionary<string, ControlInfo> Controls { get; } = new Dictionary<string, ControlInfo>(StringComparer.Ordinal);
+        public List<string> ExtraStatements { get; } = new List<string>();
         public bool Valid { get; set; }
         public string ClassName { get; set; }
     }
@@ -146,24 +148,28 @@ namespace DevStudio.Designer
             var exprStatement = statement as ExpressionStatementSyntax;
             if (exprStatement != null)
             {
+                var statementText = exprStatement.ToString();
                 var expression = exprStatement.Expression;
                 var assignment = expression as AssignmentExpressionSyntax;
                 if (assignment != null)
                 {
-                    ProcessAssignment(assignment, model);
+                    ProcessAssignment(assignment, statementText, model);
                     return;
                 }
                 var invocation = expression as InvocationExpressionSyntax;
                 if (invocation != null)
                 {
-                    ProcessInvocation(invocation, model);
+                    ProcessInvocation(invocation, statementText, model);
+                    return;
                 }
+                model.ExtraStatements.Add(statementText);
             }
         }
 
-        private static void ProcessAssignment(AssignmentExpressionSyntax assignment, DesignerModel model)
+        private static void ProcessAssignment(AssignmentExpressionSyntax assignment, string statementText, DesignerModel model)
         {
-            if (assignment.OperatorToken.ValueText != "=")
+            var op = assignment.OperatorToken.ValueText;
+            if (op != "=" && op != "+=")
             {
                 return;
             }
@@ -174,6 +180,11 @@ namespace DevStudio.Designer
             var identifier = target as IdentifierNameSyntax;
             if (identifier != null)
             {
+                if (op == "+=")
+                {
+                    model.ExtraStatements.Add(statementText);
+                    return;
+                }
                 var creation = assignment.Right as ObjectCreationExpressionSyntax;
                 if (creation != null)
                 {
@@ -190,7 +201,7 @@ namespace DevStudio.Designer
             var memberAccess = target as MemberAccessExpressionSyntax;
             if (memberAccess != null)
             {
-                if (memberAccess.Expression is ThisExpressionSyntax)
+                if (memberAccess.Expression is ThisExpressionSyntax && op == "=")
                 {
                     var creation = assignment.Right as ObjectCreationExpressionSyntax;
                     if (creation != null)
@@ -209,37 +220,49 @@ namespace DevStudio.Designer
                 }
                 var ownerName = GetOwnerName(memberAccess.Expression);
                 var propertyName = memberAccess.Name.Identifier.ValueText;
-                if (ownerName == null)
+                if (ownerName == null || propertyName == "Controls" || propertyName == "DataBindings" || propertyName == "Items" || propertyName == "Columns")
                 {
                     return;
                 }
                 ControlInfo info;
                 if (!model.Controls.TryGetValue(ownerName, out info))
                 {
+                    model.ExtraStatements.Add(statementText);
                     return;
                 }
-                if (propertyName == "Controls" || propertyName == "DataBindings" || propertyName == "Items" || propertyName == "Columns")
+                if (op == "+=")
                 {
+                    info.Events[propertyName] = valueText;
                     return;
                 }
                 info.Properties[propertyName] = valueText;
+                return;
             }
+
+            model.ExtraStatements.Add(statementText);
         }
 
-        private static void ProcessInvocation(InvocationExpressionSyntax invocation, DesignerModel model)
+        private static void ProcessInvocation(InvocationExpressionSyntax invocation, string statementText, DesignerModel model)
         {
             var called = invocation.Expression as MemberAccessExpressionSyntax;
             if (called == null)
             {
+                model.ExtraStatements.Add(statementText);
                 return;
             }
             var methodName = called.Name.Identifier.ValueText;
+            if (methodName == "SuspendLayout" || methodName == "ResumeLayout" || methodName == "PerformLayout")
+            {
+                return;
+            }
             if (methodName != "Add" && methodName != "AddRange")
             {
+                model.ExtraStatements.Add(statementText);
                 return;
             }
             if (!called.Expression.ToString().EndsWith("Controls"))
             {
+                model.ExtraStatements.Add(statementText);
                 return;
             }
 
@@ -250,8 +273,9 @@ namespace DevStudio.Designer
                 containerExpression = containerMember.Expression;
             }
             var ownerName = GetOwnerName(containerExpression);
-            if (ownerName == null)
+            if (ownerName == null || !model.Controls.ContainsKey(ownerName))
             {
+                model.ExtraStatements.Add(statementText);
                 return;
             }
 

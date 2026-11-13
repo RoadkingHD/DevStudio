@@ -21,6 +21,7 @@ namespace DevStudio.Designer
         public event Action<string> SourceChanged;
         public event Action ViewCodeRequested;
         public event Action<string> DiagnosticOutput;
+        public event Action<string> EventHandlerNeeded;
 
         private static readonly string[] ToolboxControls =
         {
@@ -50,10 +51,12 @@ namespace DevStudio.Designer
             var toolboxPanel = new Panel { Dock = DockStyle.Fill };
             toolboxPanel.Controls.Add(_toolbox);
 
-            _surface.Dock = DockStyle.Fill;
+            _surface.Location = new Point(12, 12);
+            _surface.Size = new Size(664, 504);
             _surface.SelectionChanged += OnSelectionChanged;
             _surface.ModelChanged += OnModelChanged;
             _surface.Diagnostic += message => DiagnosticOutput?.Invoke(message);
+            _surface.DefaultEventRequested += OnDefaultEventRequested;
 
             _propertyGrid.Dock = DockStyle.Fill;
             _propertyGrid.ToolbarVisible = false;
@@ -70,12 +73,14 @@ namespace DevStudio.Designer
             _split.Dock = DockStyle.Fill;
 
             var rightSplit = new SplitContainer();
-            rightSplit.Size = new Size(1150, 400);
+            rightSplit.Size = new Size(1200, 400);
             rightSplit.Orientation = Orientation.Vertical;
             rightSplit.FixedPanel = FixedPanel.Panel2;
+            rightSplit.Panel1MinSize = 200;
+            rightSplit.Panel2MinSize = 240;
             rightSplit.Panel1.Controls.Add(_split);
             rightSplit.Panel2.Controls.Add(_propertyGrid);
-            rightSplit.SplitterDistance = 900;
+            rightSplit.SplitterDistance = 950;
             rightSplit.Dock = DockStyle.Fill;
 
             Controls.Add(_toolbar);
@@ -100,6 +105,64 @@ namespace DevStudio.Designer
             if (control != null)
             {
                 _propertyGrid.SelectedObject = new ControlPropertyAdapter(_surface, control);
+            }
+        }
+
+        private void OnDefaultEventRequested(Control control)
+        {
+            if (control == null || _surface.Model == null || !_surface.Model.Valid)
+            {
+                return;
+            }
+            var name = (string)control.Tag ?? "this";
+            ControlInfo info;
+            if (!_surface.Model.Controls.TryGetValue(name, out info))
+            {
+                return;
+            }
+            var eventName = GetDefaultEventName(control);
+            var baseName = info.IsRoot
+                ? (string.IsNullOrEmpty(_surface.Model.ClassName) ? "Form1" : _surface.Model.ClassName)
+                : name;
+            var handlerName = baseName + "_" + eventName;
+            if (!info.Events.Contains(eventName))
+            {
+                info.Events[eventName] = "new System.EventHandler(this." + handlerName + ")";
+                ApplyToSource();
+            }
+            if (EventHandlerNeeded != null)
+            {
+                EventHandlerNeeded(handlerName);
+            }
+            ViewCodeRequested?.Invoke();
+        }
+
+        private static string GetDefaultEventName(Control control)
+        {
+            if (control is Form)
+            {
+                return "Load";
+            }
+            switch (control.GetType().Name)
+            {
+                case "TextBox":
+                case "RichTextBox":
+                    return "TextChanged";
+                case "CheckBox":
+                case "RadioButton":
+                    return "CheckedChanged";
+                case "ComboBox":
+                case "ListBox":
+                    return "SelectedIndexChanged";
+                case "NumericUpDown":
+                case "DateTimePicker":
+                    return "ValueChanged";
+                case "TrackBar":
+                    return "Scroll";
+                case "LinkLabel":
+                    return "LinkClicked";
+                default:
+                    return "Click";
             }
         }
 
@@ -179,12 +242,14 @@ namespace DevStudio.Designer
             }
 
             [System.ComponentModel.Browsable(true)]
+            [System.ComponentModel.Category("Design")]
             public string Name
             {
                 get { return (string)_control.Tag ?? "(this)"; }
             }
 
             [System.ComponentModel.Browsable(true)]
+            [System.ComponentModel.Category("Appearance")]
             public string Text
             {
                 get { return _control.Text; }
@@ -197,6 +262,7 @@ namespace DevStudio.Designer
             }
 
             [System.ComponentModel.Browsable(true)]
+            [System.ComponentModel.Category("Layout")]
             public Point Location
             {
                 get { return _control.Location; }
@@ -208,6 +274,7 @@ namespace DevStudio.Designer
             }
 
             [System.ComponentModel.Browsable(true)]
+            [System.ComponentModel.Category("Layout")]
             public Size Size
             {
                 get { return _control.Size; }
@@ -219,6 +286,7 @@ namespace DevStudio.Designer
             }
 
             [System.ComponentModel.Browsable(true)]
+            [System.ComponentModel.Category("Behavior")]
             public bool Visible
             {
                 get { return _control.Visible; }
@@ -230,6 +298,7 @@ namespace DevStudio.Designer
             }
 
             [System.ComponentModel.Browsable(true)]
+            [System.ComponentModel.Category("Behavior")]
             public bool Enabled
             {
                 get { return _control.Enabled; }
@@ -241,6 +310,7 @@ namespace DevStudio.Designer
             }
 
             [System.ComponentModel.Browsable(true)]
+            [System.ComponentModel.Category("Appearance")]
             public Color BackColor
             {
                 get { return _control.BackColor; }
@@ -252,6 +322,7 @@ namespace DevStudio.Designer
             }
 
             [System.ComponentModel.Browsable(true)]
+            [System.ComponentModel.Category("Appearance")]
             public Color ForeColor
             {
                 get { return _control.ForeColor; }
@@ -263,6 +334,7 @@ namespace DevStudio.Designer
             }
 
             [System.ComponentModel.Browsable(true)]
+            [System.ComponentModel.Category("Appearance")]
             public Font Font
             {
                 get { return _control.Font; }
