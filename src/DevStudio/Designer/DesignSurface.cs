@@ -39,17 +39,35 @@ namespace DevStudio.Designer
         public event Action<Control> SelectionChanged;
         public event Action<string> Diagnostic;
         public event Action<Control> DefaultEventRequested;
+        public event Action<string, Point> ToolboxDropRequested;
 
         public DesignSurface()
         {
             DoubleBuffered = true;
             BackColor = Color.FromArgb(150, 150, 155);
+            AllowDrop = true;
             MouseDown += (s, e) =>
             {
                 if (_rootControl != null)
                 {
                     Select(_rootControl);
                 }
+            };
+            DragEnter += (s, e) =>
+            {
+                if (e.Data != null && e.Data.GetDataPresent(DataFormats.Text))
+                {
+                    e.Effect = DragDropEffects.Copy;
+                }
+            };
+            DragDrop += (s, e) =>
+            {
+                var text = e.Data.GetData(DataFormats.Text) as string;
+                if (text == null)
+                {
+                    return;
+                }
+                ToolboxDropRequested?.Invoke(text, PointToClient(new Point(e.X, e.Y)));
             };
         }
 
@@ -142,7 +160,7 @@ namespace DevStudio.Designer
             }
             _rootControl.Location = new Point(0, 0);
             _rootControl.Tag = "this";
-            WireEvents(_rootControl);
+            WireControl(_rootControl);
             Location = new Point(12, 12);
             Size = new Size(_rootControl.Width + 24, _rootControl.Height + 24);
 
@@ -154,7 +172,7 @@ namespace DevStudio.Designer
                     continue;
                 }
                 instance.Tag = control.Name;
-                WireEvents(instance);
+                WireControl(instance);
                 var parent = FindParentControl(control) ?? _rootControl;
                 try
                 {
@@ -302,30 +320,30 @@ namespace DevStudio.Designer
             }
         }
 
-        private void WireEvents(Control control)
+        private void WireControl(Control control)
         {
-            control.MouseDown += OnControlMouseDown;
-            control.MouseMove += OnControlMouseMove;
-            control.MouseUp += OnControlMouseUp;
-            control.MouseLeave += OnControlMouseLeave;
+            var hook = new ControlMouseHook(this, control);
+            control.HandleCreated += (s, e) => hook.Attach();
+            control.HandleDestroyed += (s, e) => hook.ReleaseHandle();
+            hook.Attach();
             control.Paint += OnControlPaint;
         }
 
-        private void OnControlMouseDown(object sender, MouseEventArgs e)
+        internal void HandleHookMouseDown(Control control, Point p, int clicks)
         {
-            var control = (Control)sender;
             Select(control);
-            if (e.Clicks >= 2)
+            Focus();
+            if (clicks >= 2)
             {
                 DefaultEventRequested?.Invoke(control);
                 return;
             }
-            var handle = GetHandleAt(control.ClientRectangle, e.Location);
+            var handle = GetHandleAt(control.ClientRectangle, p);
             if (handle != ResizeHandle.None)
             {
                 _resizing = handle;
                 _dragging = false;
-                _dragStart = control.PointToScreen(e.Location);
+                _dragStart = control.PointToScreen(p);
                 _dragStartBounds = control.Bounds;
                 control.Capture = true;
                 return;
@@ -335,55 +353,40 @@ namespace DevStudio.Designer
                 return;
             }
             _dragging = true;
-            _dragStart = control.PointToScreen(e.Location);
+            _dragStart = control.PointToScreen(p);
             _dragStartBounds = control.Bounds;
             control.Capture = true;
         }
 
-        private void OnControlMouseMove(object sender, MouseEventArgs e)
+        internal void HandleHookMouseMove(Control control, Point p)
         {
-            var control = (Control)sender;
             if (_resizing != ResizeHandle.None && _selected != null)
             {
-                var screen = control.PointToScreen(e.Location);
+                var screen = control.PointToScreen(p);
                 var delta = new Point(screen.X - _dragStart.X, screen.Y - _dragStart.Y);
                 ApplyResize(delta);
+                EnsureSurfaceFits();
                 return;
             }
             if (_dragging && _selected != null)
             {
-                var screen = control.PointToScreen(e.Location);
+                var screen = control.PointToScreen(p);
                 var delta = new Point(screen.X - _dragStart.X, screen.Y - _dragStart.Y);
                 _selected.Bounds = new Rectangle(
                     Math.Max(0, _dragStartBounds.X + delta.X),
                     Math.Max(0, _dragStartBounds.Y + delta.Y),
                     _dragStartBounds.Width,
                     _dragStartBounds.Height);
-                return;
-            }
-            if (ReferenceEquals(control, _selected))
-            {
-                control.Cursor = GetCursor(GetHandleAt(control.ClientRectangle, e.Location));
+                EnsureSurfaceFits();
             }
         }
 
-        private void OnControlMouseLeave(object sender, EventArgs e)
-        {
-            if (_dragging || _resizing != ResizeHandle.None)
-            {
-                return;
-            }
-            ((Control)sender).Cursor = null;
-        }
-
-        private void OnControlMouseUp(object sender, MouseEventArgs e)
+        internal void HandleHookMouseUp(Control control, Point p)
         {
             if (_resizing != ResizeHandle.None && _selected != null)
             {
                 _resizing = ResizeHandle.None;
-                var resized = (Control)sender;
-                resized.Capture = false;
-                resized.Cursor = null;
+                control.Capture = false;
                 UpdateModelFromControl(_selected);
                 SelectionChanged?.Invoke(_selected);
                 return;
@@ -391,9 +394,115 @@ namespace DevStudio.Designer
             if (_dragging && _selected != null)
             {
                 _dragging = false;
-                ((Control)sender).Capture = false;
+                control.Capture = false;
                 UpdateModelFromControl(_selected);
                 SelectionChanged?.Invoke(_selected);
+            }
+        }
+
+        internal void HandleHookSetCursor(Control control)
+        {
+            var p = control.PointToClient(Cursor.Position);
+            var cursor = GetCursor(GetHandleAt(control.ClientRectangle, p));
+            if (cursor == null)
+            {
+                cursor = ReferenceEquals(control, _rootControl) ? Cursors.Default : Cursors.SizeAll;
+            }
+            Cursor.Current = cursor;
+        }
+
+        private void EnsureSurfaceFits()
+        {
+            if (_rootControl == null)
+            {
+                return;
+            }
+            int right = 0;
+            int bottom = 0;
+            foreach (Control control in Controls)
+            {
+                right = Math.Max(right, control.Right);
+                bottom = Math.Max(bottom, control.Bottom);
+            }
+            right += 12;
+            bottom += 12;
+            if (Width < right || Height < bottom)
+            {
+                Size = new Size(Math.Max(Width, right), Math.Max(Height, bottom));
+            }
+        }
+
+        public void SelectNamed(string name)
+        {
+            var control = FindByName(_rootControl, name);
+            if (control != null)
+            {
+                Select(control);
+            }
+        }
+
+        private sealed class ControlMouseHook : NativeWindow
+        {
+            private const int WM_SETCURSOR = 0x0020;
+            private const int WM_MOUSEMOVE = 0x0200;
+            private const int WM_LBUTTONDOWN = 0x0201;
+            private const int WM_LBUTTONUP = 0x0202;
+            private const int WM_LBUTTONDBLCLK = 0x0203;
+
+            private readonly DesignSurface _surface;
+            private readonly Control _control;
+
+            public ControlMouseHook(DesignSurface surface, Control control)
+            {
+                _surface = surface;
+                _control = control;
+            }
+
+            public void Attach()
+            {
+                if (_control.IsHandleCreated && Handle == IntPtr.Zero)
+                {
+                    AssignHandle(_control.Handle);
+                }
+            }
+
+            protected override void WndProc(ref Message m)
+            {
+                switch (m.Msg)
+                {
+                    case WM_LBUTTONDOWN:
+                        _surface.HandleHookMouseDown(_control, PointFromLParam(m.LParam), 1);
+                        m.Result = IntPtr.Zero;
+                        return;
+                    case WM_LBUTTONDBLCLK:
+                        _surface.HandleHookMouseDown(_control, PointFromLParam(m.LParam), 2);
+                        m.Result = IntPtr.Zero;
+                        return;
+                    case WM_MOUSEMOVE:
+                        _surface.HandleHookMouseMove(_control, PointFromLParam(m.LParam));
+                        m.Result = IntPtr.Zero;
+                        return;
+                    case WM_LBUTTONUP:
+                        _surface.HandleHookMouseUp(_control, PointFromLParam(m.LParam));
+                        m.Result = IntPtr.Zero;
+                        return;
+                    case WM_SETCURSOR:
+                        if (((int)m.LParam.ToInt64() & 0xFFFF) == 1)
+                        {
+                            _surface.HandleHookSetCursor(_control);
+                            m.Result = (IntPtr)1;
+                            return;
+                        }
+                        base.WndProc(ref m);
+                        return;
+                }
+                base.WndProc(ref m);
+            }
+
+            private static Point PointFromLParam(IntPtr lparam)
+            {
+                long value = lparam.ToInt64() & 0xFFFFFFFF;
+                return new Point((short)(value & 0xFFFF), (short)((value >> 16) & 0xFFFF));
             }
         }
 
@@ -575,6 +684,7 @@ namespace DevStudio.Designer
                 return;
             }
             info.Properties[property] = expression;
+            EnsureSurfaceFits();
             ModelChanged?.Invoke();
         }
 

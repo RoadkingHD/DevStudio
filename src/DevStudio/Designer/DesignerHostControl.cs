@@ -19,6 +19,8 @@ namespace DevStudio.Designer
         private readonly SplitContainer _split = new SplitContainer();
         private string _sourceText;
         private bool _updating;
+        private Point _toolboxDragStart;
+        private string _toolboxDragItem;
 
         public event Action<string> SourceChanged;
         public event Action ViewCodeRequested;
@@ -27,9 +29,10 @@ namespace DevStudio.Designer
 
         private static readonly string[] ToolboxControls =
         {
-            "Button", "Label", "TextBox", "CheckBox", "RadioButton", "ListBox", "ComboBox",
-            "PictureBox", "Panel", "GroupBox", "TreeView", "ListView", "ProgressBar",
-            "DateTimePicker", "RichTextBox", "NumericUpDown", "LinkLabel", "TrackBar"
+            "Button", "Label", "LinkLabel", "TextBox", "MaskedTextBox", "RichTextBox", "CheckBox", "RadioButton",
+            "ComboBox", "ListBox", "CheckedListBox", "ListView", "TreeView", "NumericUpDown", "DateTimePicker",
+            "MonthCalendar", "TrackBar", "ProgressBar", "PictureBox", "Panel", "GroupBox",
+            "FlowLayoutPanel", "TableLayoutPanel"
         };
 
         public DesignerHostControl()
@@ -39,16 +42,49 @@ namespace DevStudio.Designer
             viewCode.Click += (s, e) => ViewCodeRequested?.Invoke();
             var apply = new ToolStripButton("Apply To Source");
             apply.Click += (s, e) => ApplyToSource();
+            var delete = new ToolStripButton("Delete");
+            delete.Click += (s, e) => DeleteSelected();
             _toolbar.Items.Add(viewCode);
             _toolbar.Items.Add(new ToolStripSeparator());
             _toolbar.Items.Add(apply);
+            _toolbar.Items.Add(new ToolStripSeparator());
+            _toolbar.Items.Add(delete);
 
             _toolbox.Dock = DockStyle.Fill;
+            _toolbox.IntegralHeight = false;
             foreach (var name in ToolboxControls)
             {
                 _toolbox.Items.Add(name);
             }
-            _toolbox.SelectedIndexChanged += (s, e) => AddSelectedToolboxControl();
+            _toolbox.DoubleClick += (s, e) =>
+            {
+                var item = _toolbox.SelectedItem as string;
+                if (item != null)
+                {
+                    AddToolboxControl(item, null);
+                }
+            };
+            _toolbox.MouseDown += (s, e) =>
+            {
+                int index = _toolbox.IndexFromPoint(e.Location);
+                _toolboxDragStart = e.Location;
+                _toolboxDragItem = index >= 0 ? _toolbox.Items[index] as string : null;
+            };
+            _toolbox.MouseMove += (s, e) =>
+            {
+                if (_toolboxDragItem == null || e.Button != MouseButtons.Left)
+                {
+                    return;
+                }
+                if (Math.Abs(e.X - _toolboxDragStart.X) < SystemInformation.DragSize.Width &&
+                    Math.Abs(e.Y - _toolboxDragStart.Y) < SystemInformation.DragSize.Height)
+                {
+                    return;
+                }
+                var item = _toolboxDragItem;
+                _toolboxDragItem = null;
+                _toolbox.DoDragDrop(item, DragDropEffects.Copy);
+            };
 
             var toolboxPanel = new Panel { Dock = DockStyle.Fill };
             toolboxPanel.Controls.Add(_toolbox);
@@ -59,6 +95,7 @@ namespace DevStudio.Designer
             _surface.ModelChanged += OnModelChanged;
             _surface.Diagnostic += message => DiagnosticOutput?.Invoke(message);
             _surface.DefaultEventRequested += OnDefaultEventRequested;
+            _surface.ToolboxDropRequested += (typeName, point) => AddToolboxControl(typeName, point);
 
             _propertyGrid.Dock = DockStyle.Fill;
             _propertyGrid.ToolbarVisible = false;
@@ -176,38 +213,167 @@ namespace DevStudio.Designer
             }
         }
 
-        private void AddSelectedToolboxControl()
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
-            if (_toolbox.SelectedItem == null || _surface.Model == null || !_surface.Model.Valid)
+            if (keyData == Keys.Delete && _surface.Focused && DeleteSelected())
             {
-                return;
+                return true;
             }
-            var typeName = "System.Windows.Forms." + _toolbox.SelectedItem;
-            var baseName = _toolbox.SelectedItem.ToString();
-            string name = baseName.ToLowerInvariant();
-            int suffix = 1;
-            while (_surface.Model.Controls.ContainsKey(name + suffix))
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
+
+        private bool DeleteSelected()
+        {
+            var control = _surface.SelectedControl;
+            if (control == null || ReferenceEquals(control, _surface.RootControl) ||
+                _surface.Model == null || !_surface.Model.Valid)
             {
-                suffix++;
+                return false;
             }
-            name = name + suffix;
-
-            var info = new ControlInfo
+            var name = (string)control.Tag;
+            ControlInfo info;
+            if (string.IsNullOrEmpty(name) || !_surface.Model.Controls.TryGetValue(name, out info))
             {
-                Name = name,
-                TypeName = typeName
-            };
-            info.Properties["Location"] = "new System.Drawing.Point(30, 30)";
-            info.Properties["Size"] = baseName == "Button" || baseName == "TextBox"
-                ? "new System.Drawing.Size(100, 23)"
-                : "new System.Drawing.Size(120, 100)";
-            info.Properties["Text"] = "\"" + baseName + "\"";
-            _surface.Model.Controls[name] = info;
-            _surface.Model.Root.Children.Add(name);
-
+                return false;
+            }
+            foreach (var other in _surface.Model.Controls.Values)
+            {
+                other.Children.Remove(name);
+            }
+            _surface.Model.Controls.Remove(name);
             ApplyToSource();
             ReloadSurface();
-            _toolbox.SelectedIndex = -1;
+            _surface.Select(_surface.RootControl);
+            return true;
+        }
+
+        private void AddToolboxControl(string baseName, Point? dropLocation)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(baseName) || _surface.Model == null || !_surface.Model.Valid)
+                {
+                    return;
+                }
+                var size = GetDefaultSize(baseName);
+                var location = dropLocation.HasValue
+                    ? new Point(
+                        Math.Max(0, dropLocation.Value.X - size.Width / 2),
+                        Math.Max(0, dropLocation.Value.Y - size.Height / 2))
+                    : new Point(30, 30);
+                string name = baseName.ToLowerInvariant();
+                int suffix = 1;
+                while (_surface.Model.Controls.ContainsKey(name + suffix))
+                {
+                    suffix++;
+                }
+                name = name + suffix;
+
+                var info = new ControlInfo
+                {
+                    Name = name,
+                    TypeName = "System.Windows.Forms." + baseName
+                };
+                info.Properties["Location"] = "new System.Drawing.Point(" + location.X + ", " + location.Y + ")";
+                info.Properties["Size"] = "new System.Drawing.Size(" + size.Width + ", " + size.Height + ")";
+                if (HasText(baseName))
+                {
+                    info.Properties["Text"] = "\"" + name + "\"";
+                }
+                _surface.Model.Controls[name] = info;
+                ResolveDropParent().Children.Add(name);
+
+                ApplyToSource();
+                ReloadSurface();
+                _surface.SelectNamed(name);
+            }
+            catch (Exception ex)
+            {
+                DiagnosticOutput?.Invoke("Designer: could not add " + baseName + ": " + ex.Message);
+            }
+            finally
+            {
+                _toolbox.SelectedIndex = -1;
+            }
+        }
+
+        private ControlInfo ResolveDropParent()
+        {
+            var selected = _surface.SelectedControl;
+            while (selected != null)
+            {
+                if (ReferenceEquals(selected, _surface.RootControl))
+                {
+                    return _surface.Model.Root;
+                }
+                var name = (string)selected.Tag;
+                ControlInfo info;
+                if (name != null && _surface.Model.Controls.TryGetValue(name, out info) && IsContainerType(info.TypeName))
+                {
+                    return info;
+                }
+                selected = selected.Parent;
+            }
+            return _surface.Model.Root;
+        }
+
+        private static bool IsContainerType(string typeName)
+        {
+            return typeName == "System.Windows.Forms.Panel"
+                || typeName == "System.Windows.Forms.GroupBox"
+                || typeName == "System.Windows.Forms.TabPage"
+                || typeName == "System.Windows.Forms.UserControl"
+                || typeName == "System.Windows.Forms.FlowLayoutPanel"
+                || typeName == "System.Windows.Forms.TableLayoutPanel"
+                || typeName.EndsWith(".SplitContainer")
+                || typeName.EndsWith(".SplitterPanel");
+        }
+
+        private static bool HasText(string typeName)
+        {
+            switch (typeName)
+            {
+                case "Label":
+                case "LinkLabel":
+                case "Button":
+                case "CheckBox":
+                case "RadioButton":
+                case "GroupBox":
+                case "TextBox":
+                case "RichTextBox":
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static Size GetDefaultSize(string typeName)
+        {
+            switch (typeName)
+            {
+                case "Button":
+                case "TextBox":
+                case "RichTextBox":
+                case "MaskedTextBox":
+                    return new Size(100, 23);
+                case "Label":
+                case "LinkLabel":
+                    return new Size(100, 15);
+                case "CheckBox":
+                case "RadioButton":
+                    return new Size(104, 20);
+                case "ComboBox":
+                    return new Size(121, 21);
+                case "ProgressBar":
+                case "TrackBar":
+                    return new Size(100, 17);
+                case "NumericUpDown":
+                    return new Size(60, 20);
+                case "DateTimePicker":
+                    return new Size(200, 20);
+                default:
+                    return new Size(120, 100);
+            }
         }
 
         private void ReloadSurface()
