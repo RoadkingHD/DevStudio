@@ -499,6 +499,23 @@ namespace DevStudio.Editor
                     e.Cancel = true;
                 }
             };
+            _autocomplete.Selecting += (s, args) =>
+            {
+                var fragment = _autocomplete.Fragment;
+                if (fragment == null || args.Item == null)
+                {
+                    return;
+                }
+                int dot = fragment.Text.LastIndexOf('.');
+                if (dot < 0)
+                {
+                    return;
+                }
+                args.Handled = true;
+                _tb.Selection.Start = new Place(fragment.Start.iChar + dot + 1, fragment.Start.iLine);
+                _tb.Selection.End = fragment.End;
+                _tb.InsertText(args.Item.Text);
+            };
         }
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)

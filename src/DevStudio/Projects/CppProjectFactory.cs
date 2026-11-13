@@ -6,11 +6,12 @@ namespace DevStudio.Projects
 {
     public static class CppProjectFactory
     {
-        public static CppProject CreateNew(string vcxprojPath, string name)
+        public static CppProject CreateNew(string vcxprojPath, string name, OutputKindEx kind)
         {
             vcxprojPath = Path.GetFullPath(vcxprojPath);
             Directory.CreateDirectory(Path.GetDirectoryName(vcxprojPath));
             var guid = Guid.NewGuid().ToString("B").ToUpperInvariant();
+            var configType = kind == OutputKindEx.Library ? "DynamicLibrary" : "Application";
             var xml = string.Format(
                 "<?xml version=\"1.0\" encoding=\"utf-8\"?>" + Environment.NewLine +
                 "<Project DefaultTargets=\"Build\" ToolsVersion=\"15.0\" xmlns=\"http://schemas.microsoft.com/developer/msbuild/2003\">" + Environment.NewLine +
@@ -31,11 +32,11 @@ namespace DevStudio.Projects
                 "  </PropertyGroup>" + Environment.NewLine +
                 "  <Import Project=\"$(VCTargetsPath)\\Microsoft.Cpp.Default.props\" />" + Environment.NewLine +
                 "  <PropertyGroup Condition=\"'$(Configuration)|$(Platform)'=='Debug|Win32'\" Label=\"Configuration\">" + Environment.NewLine +
-                "    <ConfigurationType>Application</ConfigurationType>" + Environment.NewLine +
+                "    <ConfigurationType>{2}</ConfigurationType>" + Environment.NewLine +
                 "    <PlatformToolset>v141</PlatformToolset>" + Environment.NewLine +
                 "  </PropertyGroup>" + Environment.NewLine +
                 "  <PropertyGroup Condition=\"'$(Configuration)|$(Platform)'=='Release|x64'\" Label=\"Configuration\">" + Environment.NewLine +
-                "    <ConfigurationType>Application</ConfigurationType>" + Environment.NewLine +
+                "    <ConfigurationType>{2}</ConfigurationType>" + Environment.NewLine +
                 "    <PlatformToolset>v141</PlatformToolset>" + Environment.NewLine +
                 "  </PropertyGroup>" + Environment.NewLine +
                 "  <Import Project=\"$(VCTargetsPath)\\Microsoft.Cpp.props\" />" + Environment.NewLine +
@@ -48,7 +49,7 @@ namespace DevStudio.Projects
                 "  </ItemGroup>" + Environment.NewLine +
                 "  <Import Project=\"$(VCTargetsPath)\\Microsoft.Cpp.targets\" />" + Environment.NewLine +
                 "</Project>" + Environment.NewLine,
-                guid, name);
+                guid, name, configType);
             File.WriteAllText(vcxprojPath, xml);
             return new CppProject(vcxprojPath);
         }

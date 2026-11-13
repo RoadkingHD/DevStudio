@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -44,6 +45,7 @@ namespace DevStudio.UI
         {
             InitializeComponent();
             ApplyToolbarIcons();
+            SetupEditorTabCloseButtons();
             _csharpBuilder = new CSharpBuildService(outputPanel.AppendLine);
             _cppBuilder = new CppBuildService(outputPanel.AppendLine);
             WireEvents();
@@ -57,6 +59,58 @@ namespace DevStudio.UI
             }
             UiTheme.SetTheme(EditorTheme.Dark, this);
             UpdateDebugUi();
+        }
+
+        private void SetupEditorTabCloseButtons()
+        {
+            editorTabs.DrawMode = TabDrawMode.OwnerDrawFixed;
+            editorTabs.ItemSize = new Size(160, 22);
+            editorTabs.DrawItem += (s, e) =>
+            {
+                var page = editorTabs.TabPages[e.Index];
+                bool selected = editorTabs.SelectedIndex == e.Index;
+                using (var bg = new SolidBrush(selected ? UiTheme.Panel : UiTheme.Window))
+                {
+                    e.Graphics.FillRectangle(bg, e.Bounds);
+                }
+                var textRect = new Rectangle(e.Bounds.X + 6, e.Bounds.Y, e.Bounds.Width - 26, e.Bounds.Height);
+                TextRenderer.DrawText(e.Graphics, page.Text, Font, textRect, UiTheme.Text,
+                    TextFormatFlags.EndEllipsis | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
+                var closeRect = GetTabCloseRect(e.Bounds);
+                using (var pen = new Pen(UiTheme.Text, 1.4f))
+                {
+                    e.Graphics.DrawLine(pen, closeRect.Left + 3, closeRect.Top + 3, closeRect.Right - 3, closeRect.Bottom - 3);
+                    e.Graphics.DrawLine(pen, closeRect.Right - 3, closeRect.Top + 3, closeRect.Left + 3, closeRect.Bottom - 3);
+                }
+            };
+            editorTabs.MouseUp += (s, e) =>
+            {
+                if (e.Button != MouseButtons.Left)
+                {
+                    return;
+                }
+                for (int i = 0; i < editorTabs.TabCount && i < _tabs.Count; i++)
+                {
+                    if (GetTabCloseRect(editorTabs.GetTabRect(i)).Contains(e.Location))
+                    {
+                        CloseTab(_tabs[i]);
+                        break;
+                    }
+                }
+            };
+        }
+
+        private static Rectangle GetTabCloseRect(Rectangle tabBounds)
+        {
+            return new Rectangle(tabBounds.Right - 18, tabBounds.Top + 5, 13, tabBounds.Height - 10);
+        }
+
+        private void CloseAllTabsClick(object sender, EventArgs e)
+        {
+            for (int i = _tabs.Count - 1; i >= 0; i--)
+            {
+                CloseTab(_tabs[i]);
+            }
         }
 
         private void ApplyToolbarIcons()
@@ -551,7 +605,10 @@ namespace DevStudio.UI
             }
             statusLabel.Text = reason;
             outputPanel.AppendLine("Debugger stopped: " + reason);
-            SelectBottomTab("CallStack");
+            if (!_debugger.IsStepping)
+            {
+                SelectBottomTab("CallStack");
+            }
             var frame = info.CallStack.FirstOrDefault(f => !string.IsNullOrEmpty(f.File));
             if (frame != null)
             {
@@ -864,24 +921,59 @@ namespace DevStudio.UI
                 if (dialog.Language == DevLanguage.CSharp)
                 {
                     var csprojPath = Path.Combine(dialog.ProjectDirectory, dialog.ProjectName + ".csproj");
-                    project = CSharpProject.CreateNew(csprojPath, dialog.ProjectName, OutputKindEx.ConsoleApplication);
-                    var programPath = Path.Combine(dialog.ProjectDirectory, "Program.cs");
-                    if (!File.Exists(programPath))
+                    project = CSharpProject.CreateNew(csprojPath, dialog.ProjectName, dialog.OutputKind);
+                    if (dialog.OutputKind == OutputKindEx.WindowsApplication)
                     {
-                        File.WriteAllText(programPath, NewCSharpTemplate(dialog.ProjectName));
+                        var formPath = Path.Combine(dialog.ProjectDirectory, "MainForm.cs");
+                        var designerPath = Path.Combine(dialog.ProjectDirectory, "MainForm.Designer.cs");
+                        var programPath = Path.Combine(dialog.ProjectDirectory, "Program.cs");
+                        if (!File.Exists(formPath))
+                        {
+                            File.WriteAllText(formPath, NewCSharpFormTemplate(dialog.ProjectName));
+                        }
+                        if (!File.Exists(designerPath))
+                        {
+                            File.WriteAllText(designerPath, NewCSharpFormDesignerTemplate(dialog.ProjectName));
+                        }
+                        if (!File.Exists(programPath))
+                        {
+                            File.WriteAllText(programPath, NewCSharpWinAppTemplate(dialog.ProjectName));
+                        }
+                        ((CSharpProject)project).AddFile(formPath);
+                        ((CSharpProject)project).AddFile(designerPath);
+                        ((CSharpProject)project).AddFile(programPath);
                     }
-                    ((CSharpProject)project).AddFile(programPath);
+                    else if (dialog.OutputKind == OutputKindEx.Library)
+                    {
+                        var classPath = Path.Combine(dialog.ProjectDirectory, "Class1.cs");
+                        if (!File.Exists(classPath))
+                        {
+                            File.WriteAllText(classPath, NewCSharpClassTemplate(dialog.ProjectName));
+                        }
+                        ((CSharpProject)project).AddFile(classPath);
+                    }
+                    else
+                    {
+                        var programPath = Path.Combine(dialog.ProjectDirectory, "Program.cs");
+                        if (!File.Exists(programPath))
+                        {
+                            File.WriteAllText(programPath, NewCSharpTemplate(dialog.ProjectName));
+                        }
+                        ((CSharpProject)project).AddFile(programPath);
+                    }
                     project.Save();
                     WorkspaceManager.Instance.LoadProject((CSharpProject)project);
                 }
                 else
                 {
                     var vcxprojPath = Path.Combine(dialog.ProjectDirectory, dialog.ProjectName + ".vcxproj");
-                    project = CppProjectFactory.CreateNew(vcxprojPath, dialog.ProjectName);
+                    project = CppProjectFactory.CreateNew(vcxprojPath, dialog.ProjectName, dialog.OutputKind);
                     var mainPath = Path.Combine(dialog.ProjectDirectory, "main.cpp");
                     if (!File.Exists(mainPath))
                     {
-                        File.WriteAllText(mainPath, NewCppTemplate());
+                        File.WriteAllText(mainPath, dialog.OutputKind == OutputKindEx.Library
+                            ? NewCppLibraryTemplate(dialog.ProjectName, dialog.IsProxyDll)
+                            : NewCppTemplate());
                     }
                     ((CppProject)project).AddFile(mainPath);
                 }
@@ -996,18 +1088,10 @@ namespace DevStudio.UI
         {
             if (_projects.Any(p => string.Equals(p.FilePath, project.FilePath, StringComparison.OrdinalIgnoreCase)))
             {
-                foreach (var item in project.SourceFiles)
-                {
-                    OpenFile(item.FullPath);
-                }
                 return;
             }
             _projects.Add(project);
             solutionExplorer.LoadProject(project);
-            foreach (var item in project.SourceFiles)
-            {
-                OpenFile(item.FullPath);
-            }
             statusLabel.Text = "Loaded project " + project.Name;
             Text = "DevStudio - " + project.Name;
         }
@@ -1206,6 +1290,16 @@ namespace DevStudio.UI
                 }
                 File.WriteAllText(fullPath, dialog.GetTemplateContent());
                 AddFileToProject(project, fullPath);
+                if (dialog.HasDesignerFile)
+                {
+                    var designerPath = Path.Combine(project.ProjectDirectory,
+                        Path.GetFileNameWithoutExtension(dialog.FileName) + ".Designer.cs");
+                    if (!File.Exists(designerPath))
+                    {
+                        File.WriteAllText(designerPath, dialog.GetDesignerFileContent());
+                        AddFileToProject(project, designerPath);
+                    }
+                }
                 solutionExplorer.RefreshProject(project);
                 OpenFile(fullPath);
                 statusLabel.Text = "Added " + dialog.FileName;
@@ -1219,6 +1313,10 @@ namespace DevStudio.UI
             editorTabs.TabPages.Remove(tab.Page);
             tab.Page.Controls.Clear();
             tab.Editor.Dispose();
+            if (tab.Designer != null)
+            {
+                tab.Designer.Dispose();
+            }
         }
 
         private void ToggleMinimapClick(object sender, EventArgs e)
@@ -1316,6 +1414,131 @@ namespace DevStudio.UI
                    "    std::cout << \"Hello from DevStudio C++!\" << std::endl;" + Environment.NewLine +
                    "    return 0;" + Environment.NewLine +
                    "}" + Environment.NewLine;
+        }
+
+        private static string NewCSharpClassTemplate(string projectName)
+        {
+            return "using System;" + Environment.NewLine +
+                   Environment.NewLine +
+                   "namespace " + projectName + Environment.NewLine +
+                   "{" + Environment.NewLine +
+                   "    public class Class1" + Environment.NewLine +
+                   "    {" + Environment.NewLine +
+                   "    }" + Environment.NewLine +
+                   "}" + Environment.NewLine;
+        }
+
+        private static string NewCSharpFormTemplate(string projectName)
+        {
+            return "using System;" + Environment.NewLine +
+                   "using System.Windows.Forms;" + Environment.NewLine +
+                   Environment.NewLine +
+                   "namespace " + projectName + Environment.NewLine +
+                   "{" + Environment.NewLine +
+                   "    public partial class MainForm : Form" + Environment.NewLine +
+                   "    {" + Environment.NewLine +
+                   "        public MainForm()" + Environment.NewLine +
+                   "        {" + Environment.NewLine +
+                   "            InitializeComponent();" + Environment.NewLine +
+                   "        }" + Environment.NewLine +
+                   "    }" + Environment.NewLine +
+                   "}" + Environment.NewLine;
+        }
+
+        private static string NewCSharpFormDesignerTemplate(string projectName)
+        {
+            return "using System.ComponentModel;" + Environment.NewLine +
+                   "using System.Windows.Forms;" + Environment.NewLine +
+                   Environment.NewLine +
+                   "namespace " + projectName + Environment.NewLine +
+                   "{" + Environment.NewLine +
+                   "    partial class MainForm" + Environment.NewLine +
+                   "    {" + Environment.NewLine +
+                   "        private System.ComponentModel.IContainer components = null;" + Environment.NewLine +
+                   Environment.NewLine +
+                   "        protected override void Dispose(bool disposing)" + Environment.NewLine +
+                   "        {" + Environment.NewLine +
+                   "            if (disposing && (components != null))" + Environment.NewLine +
+                   "            {" + Environment.NewLine +
+                   "                components.Dispose();" + Environment.NewLine +
+                   "            }" + Environment.NewLine +
+                   "            base.Dispose(disposing);" + Environment.NewLine +
+                   "        }" + Environment.NewLine +
+                   Environment.NewLine +
+                   "        #region Windows Form Designer generated code" + Environment.NewLine +
+                   Environment.NewLine +
+                   "        private void InitializeComponent()" + Environment.NewLine +
+                   "        {" + Environment.NewLine +
+                   "            this.SuspendLayout();" + Environment.NewLine +
+                   "            // " + Environment.NewLine +
+                   "            // MainForm" + Environment.NewLine +
+                   "            // " + Environment.NewLine +
+                   "            this.ClientSize = new System.Drawing.Size(284, 261);" + Environment.NewLine +
+                   "            this.Name = \"MainForm\";" + Environment.NewLine +
+                   "            this.Text = \"" + projectName + "\";" + Environment.NewLine +
+                   "            this.ResumeLayout(false);" + Environment.NewLine +
+                   "        }" + Environment.NewLine +
+                   Environment.NewLine +
+                   "        #endregion" + Environment.NewLine +
+                   "    }" + Environment.NewLine +
+                   "}" + Environment.NewLine;
+        }
+
+        private static string NewCSharpWinAppTemplate(string projectName)
+        {
+            return "using System;" + Environment.NewLine +
+                   "using System.Windows.Forms;" + Environment.NewLine +
+                   Environment.NewLine +
+                   "namespace " + projectName + Environment.NewLine +
+                   "{" + Environment.NewLine +
+                   "    public static class Program" + Environment.NewLine +
+                   "    {" + Environment.NewLine +
+                   "        [STAThread]" + Environment.NewLine +
+                   "        public static void Main(string[] args)" + Environment.NewLine +
+                   "        {" + Environment.NewLine +
+                   "            Application.EnableVisualStyles();" + Environment.NewLine +
+                   "            Application.SetCompatibleTextRenderingDefault(false);" + Environment.NewLine +
+                   "            Application.Run(new MainForm());" + Environment.NewLine +
+                   "        }" + Environment.NewLine +
+                   "    }" + Environment.NewLine +
+                   "}" + Environment.NewLine;
+        }
+
+        private static string NewCppLibraryTemplate(string projectName, bool proxy)
+        {
+            var nl = Environment.NewLine;
+            if (proxy)
+            {
+                return "// Proxy DLL - exported stub functions. Replace the bodies with" + nl +
+                       "// forwarding calls to the original DLL as needed." + nl +
+                       "#include <windows.h>" + nl +
+                       nl +
+                       "extern \"C\" __declspec(dllexport) int __stdcall Proxy_Initialize(HWND hwnd, DWORD reason, LPVOID reserved)" + nl +
+                       "{" + nl +
+                       "    return 1;" + nl +
+                       "}" + nl +
+                       nl +
+                       "extern \"C\" __declspec(dllexport) void __stdcall Proxy_Shutdown()" + nl +
+                       "{" + nl +
+                       "}" + nl +
+                       nl +
+                       "BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)" + nl +
+                       "{" + nl +
+                       "    switch (reason)" + nl +
+                       "    {" + nl +
+                       "        case DLL_PROCESS_ATTACH:" + nl +
+                       "        case DLL_PROCESS_DETACH:" + nl +
+                       "            break;" + nl +
+                       "    }" + nl +
+                       "    return TRUE;" + nl +
+                       "}" + nl;
+            }
+            return "#include <iostream>" + nl +
+                   nl +
+                   "extern \"C\" __declspec(dllexport) int Add(int a, int b)" + nl +
+                   "{" + nl +
+                   "    return a + b;" + nl +
+                   "}" + nl;
         }
     }
 }

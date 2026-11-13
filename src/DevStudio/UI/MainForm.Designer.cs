@@ -22,6 +22,7 @@ namespace DevStudio.UI
         private System.Windows.Forms.ToolStripMenuItem openSingleFileMenu;
         private System.Windows.Forms.ToolStripMenuItem saveMenu;
         private System.Windows.Forms.ToolStripMenuItem saveAllMenu;
+        private System.Windows.Forms.ToolStripMenuItem closeAllMenu;
         private System.Windows.Forms.ToolStripMenuItem exitMenu;
         private System.Windows.Forms.ToolStripMenuItem editMenu;
         private System.Windows.Forms.ToolStripMenuItem findMenu;
@@ -99,6 +100,7 @@ namespace DevStudio.UI
             this.openSingleFileMenu = new System.Windows.Forms.ToolStripMenuItem();
             this.saveMenu = new System.Windows.Forms.ToolStripMenuItem();
             this.saveAllMenu = new System.Windows.Forms.ToolStripMenuItem();
+            this.closeAllMenu = new System.Windows.Forms.ToolStripMenuItem();
             this.exitMenu = new System.Windows.Forms.ToolStripMenuItem();
             this.editMenu = new System.Windows.Forms.ToolStripMenuItem();
             this.findMenu = new System.Windows.Forms.ToolStripMenuItem();
@@ -174,6 +176,7 @@ namespace DevStudio.UI
             new System.Windows.Forms.ToolStripSeparator(),
             this.saveMenu,
             this.saveAllMenu,
+            this.closeAllMenu,
             new System.Windows.Forms.ToolStripSeparator(),
             this.exitMenu});
             this.fileMenu.Name = "fileMenu";
@@ -220,6 +223,12 @@ namespace DevStudio.UI
             this.saveAllMenu.ShortcutKeys = ((System.Windows.Forms.Keys)((System.Windows.Forms.Keys.Control | System.Windows.Forms.Keys.Shift | System.Windows.Forms.Keys.S)));
             this.saveAllMenu.Text = "Save All";
             this.saveAllMenu.Click += new System.EventHandler(this.SaveAllClick);
+            //
+            // closeAllMenu
+            //
+            this.closeAllMenu.Name = "closeAllMenu";
+            this.closeAllMenu.Text = "Close All Documents";
+            this.closeAllMenu.Click += new System.EventHandler(this.CloseAllTabsClick);
             //
             // exitMenu
             //

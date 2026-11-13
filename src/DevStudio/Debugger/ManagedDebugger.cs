@@ -83,6 +83,7 @@ namespace DevStudio.Debugger
         public event Action ProcessExited;
 
         public bool IsRunning { get; private set; }
+        public bool IsStepping { get { return _stepping; } }
         public bool IsStopped
         {
             get { return _stopped; }

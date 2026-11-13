@@ -196,7 +196,11 @@ namespace DevStudio.Designer
                     if (creation != null)
                     {
                         var createdType = NormalizeType(creation.Type.ToString());
-                        if (!createdType.StartsWith("System.ComponentModel."))
+                        if (createdType.StartsWith("System.Drawing.") || createdType.StartsWith("System.ComponentModel."))
+                        {
+                            model.Root.Properties[memberAccess.Name.Identifier.ValueText] = valueText;
+                        }
+                        else
                         {
                             GetOrCreate(model, memberAccess.Name.Identifier.ValueText).TypeName = createdType;
                         }

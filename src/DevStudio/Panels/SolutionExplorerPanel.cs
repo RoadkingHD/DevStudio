@@ -253,11 +253,28 @@ namespace DevStudio.Panels
             _openItem.Enabled = isFile;
             _addExistingItem.Enabled = isProject;
             _addNewItem.Enabled = isProject;
-            _addReferenceItem.Enabled = isProject && project != null && project.Language == DevLanguage.CSharp;
+            _addReferenceItem.Enabled = project != null && project.Language == DevLanguage.CSharp
+                && (isProject || IsReferencesContainer(node));
             _removeFileItem.Enabled = isFile;
             _setStartupItem.Enabled = isProject;
             _closeProjectItem.Enabled = isProject;
             _removeProjectItem.Enabled = isProject;
+        }
+
+        private static bool IsReferencesContainer(TreeNode node)
+        {
+            for (var current = node; current != null; current = current.Parent)
+            {
+                if (current.Tag == null && current.Text == "References")
+                {
+                    return true;
+                }
+                if (current.Tag is ProjectBase)
+                {
+                    return false;
+                }
+            }
+            return false;
         }
 
         private void WithFileNode(Action<string> action)

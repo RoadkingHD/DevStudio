@@ -219,7 +219,7 @@ namespace DevStudio.Services
                     var name = Path.GetFileNameWithoutExtension(dll);
                     if (name.StartsWith("System.", StringComparison.OrdinalIgnoreCase) ||
                         name.StartsWith("Microsoft.", StringComparison.OrdinalIgnoreCase) ||
-                        name == "mscorlib" || name == "netstandard" || name == "WindowsBase")
+                        name == "System" || name == "mscorlib" || name == "netstandard" || name == "WindowsBase")
                     {
                         if (!IsManagedAssembly(dll))
                         {

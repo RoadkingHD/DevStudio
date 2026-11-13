@@ -13,6 +13,8 @@ namespace DevStudio.UI
         private System.Windows.Forms.GroupBox languageGroup;
         private System.Windows.Forms.RadioButton csharpRadio;
         private System.Windows.Forms.RadioButton cppRadio;
+        private System.Windows.Forms.Label templateLabel;
+        private System.Windows.Forms.ComboBox templateCombo;
         private System.Windows.Forms.Button okButton;
         private System.Windows.Forms.Button cancelButton;
 
@@ -36,6 +38,8 @@ namespace DevStudio.UI
             this.languageGroup = new System.Windows.Forms.GroupBox();
             this.csharpRadio = new System.Windows.Forms.RadioButton();
             this.cppRadio = new System.Windows.Forms.RadioButton();
+            this.templateLabel = new System.Windows.Forms.Label();
+            this.templateCombo = new System.Windows.Forms.ComboBox();
             this.okButton = new System.Windows.Forms.Button();
             this.cancelButton = new System.Windows.Forms.Button();
             this.languageGroup.SuspendLayout();
@@ -124,10 +128,28 @@ namespace DevStudio.UI
             this.cppRadio.Text = "C/C++ (external MinGW compiler)";
             this.cppRadio.UseVisualStyleBackColor = true;
             //
+            // templateLabel
+            //
+            this.templateLabel.AutoSize = true;
+            this.templateLabel.Location = new System.Drawing.Point(15, 235);
+            this.templateLabel.Name = "templateLabel";
+            this.templateLabel.Size = new System.Drawing.Size(57, 13);
+            this.templateLabel.TabIndex = 7;
+            this.templateLabel.Text = "&Template:";
+            //
+            // templateCombo
+            //
+            this.templateCombo.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.templateCombo.FormattingEnabled = true;
+            this.templateCombo.Location = new System.Drawing.Point(18, 252);
+            this.templateCombo.Name = "templateCombo";
+            this.templateCombo.Size = new System.Drawing.Size(360, 21);
+            this.templateCombo.TabIndex = 8;
+            //
             // okButton
             //
             this.okButton.DialogResult = System.Windows.Forms.DialogResult.OK;
-            this.okButton.Location = new System.Drawing.Point(222, 240);
+            this.okButton.Location = new System.Drawing.Point(222, 292);
             this.okButton.Name = "okButton";
             this.okButton.Size = new System.Drawing.Size(75, 25);
             this.okButton.TabIndex = 7;
@@ -136,7 +158,7 @@ namespace DevStudio.UI
             // cancelButton
             //
             this.cancelButton.DialogResult = System.Windows.Forms.DialogResult.Cancel;
-            this.cancelButton.Location = new System.Drawing.Point(303, 240);
+            this.cancelButton.Location = new System.Drawing.Point(303, 292);
             this.cancelButton.Name = "cancelButton";
             this.cancelButton.Size = new System.Drawing.Size(75, 25);
             this.cancelButton.TabIndex = 8;
@@ -148,7 +170,7 @@ namespace DevStudio.UI
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.CancelButton = this.cancelButton;
-            this.ClientSize = new System.Drawing.Size(393, 281);
+            this.ClientSize = new System.Drawing.Size(393, 333);
             this.Controls.Add(this.titleLabel);
             this.Controls.Add(this.nameLabel);
             this.Controls.Add(this.nameText);
@@ -156,6 +178,8 @@ namespace DevStudio.UI
             this.Controls.Add(this.locationText);
             this.Controls.Add(this.browseButton);
             this.Controls.Add(this.languageGroup);
+            this.Controls.Add(this.templateLabel);
+            this.Controls.Add(this.templateCombo);
             this.Controls.Add(this.okButton);
             this.Controls.Add(this.cancelButton);
             this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;

@@ -14,6 +14,58 @@ namespace DevStudio.Dialogs
             get { return nameBox.Text.Trim(); }
         }
 
+        public bool HasDesignerFile
+        {
+            get
+            {
+                var template = templateCombo.SelectedItem as string ?? "";
+                return _language == DevLanguage.CSharp && template.StartsWith("Windows Form");
+            }
+        }
+
+        public string GetDesignerFileContent()
+        {
+            var name = System.IO.Path.GetFileNameWithoutExtension(FileName);
+            var nl = Environment.NewLine;
+            var sb = new System.Text.StringBuilder();
+            sb.Append("using System.ComponentModel;").Append(nl);
+            sb.Append("using System.Windows.Forms;").Append(nl);
+            sb.Append(nl);
+            sb.Append("namespace ").Append(_projectName).Append(nl);
+            sb.Append("{").Append(nl);
+            sb.Append("    partial class ").Append(name).Append(nl);
+            sb.Append("    {").Append(nl);
+            sb.Append("        private System.ComponentModel.IContainer components = null;").Append(nl);
+            sb.Append(nl);
+            sb.Append("        protected override void Dispose(bool disposing)").Append(nl);
+            sb.Append("        {").Append(nl);
+            sb.Append("            if (disposing && (components != null))").Append(nl);
+            sb.Append("            {").Append(nl);
+            sb.Append("                components.Dispose();").Append(nl);
+            sb.Append("            }").Append(nl);
+            sb.Append("            base.Dispose(disposing);").Append(nl);
+            sb.Append("        }").Append(nl);
+            sb.Append(nl);
+            sb.Append("        #region Windows Form Designer generated code").Append(nl);
+            sb.Append(nl);
+            sb.Append("        private void InitializeComponent()").Append(nl);
+            sb.Append("        {").Append(nl);
+            sb.Append("            this.SuspendLayout();").Append(nl);
+            sb.Append("            // ").Append(nl);
+            sb.Append("            // ").Append(name).Append(nl);
+            sb.Append("            // ").Append(nl);
+            sb.Append("            this.ClientSize = new System.Drawing.Size(284, 261);").Append(nl);
+            sb.Append("            this.Name = \"").Append(name).Append("\";").Append(nl);
+            sb.Append("            this.Text = \"").Append(name).Append("\";").Append(nl);
+            sb.Append("            this.ResumeLayout(false);").Append(nl);
+            sb.Append("        }").Append(nl);
+            sb.Append(nl);
+            sb.Append("        #endregion").Append(nl);
+            sb.Append("    }").Append(nl);
+            sb.Append("}").Append(nl);
+            return sb.ToString();
+        }
+
         public AddNewFileDialog(DevLanguage language, string projectName)
         {
             _language = language;

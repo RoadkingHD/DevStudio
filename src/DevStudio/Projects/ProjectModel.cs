@@ -546,7 +546,7 @@ namespace DevStudio.Projects
 
         public override string OutputFileName
         {
-            get { return AssemblyName + ".exe"; }
+            get { return OutputKind == OutputKindEx.Library ? AssemblyName + ".dll" : AssemblyName + ".exe"; }
         }
 
         public override void Save()
@@ -574,6 +574,24 @@ namespace DevStudio.Projects
                 if (!compileGroup.Elements(ns + "ClCompile").Any(e => string.Equals((string)e.Attribute("Include"), rel, StringComparison.OrdinalIgnoreCase)))
                 {
                     compileGroup.Add(new XElement(ns + "ClCompile", new XAttribute("Include", rel)));
+                }
+            }
+            var includeGroup = root.Elements(ns + "ItemGroup").FirstOrDefault(g => g.Elements(ns + "ClInclude").Any());
+            if (includeGroup == null)
+            {
+                includeGroup = new XElement(ns + "ItemGroup");
+                root.Add(includeGroup);
+            }
+            foreach (var item in Items.Where(i =>
+            {
+                var ext = Path.GetExtension(i.FullPath).ToLowerInvariant();
+                return ext == ".h" || ext == ".hpp" || ext == ".hh" || ext == ".hxx";
+            }))
+            {
+                var rel = MakeRelative(ProjectDirectory, item.FullPath);
+                if (!includeGroup.Elements(ns + "ClInclude").Any(e => string.Equals((string)e.Attribute("Include"), rel, StringComparison.OrdinalIgnoreCase)))
+                {
+                    includeGroup.Add(new XElement(ns + "ClInclude", new XAttribute("Include", rel)));
                 }
             }
             doc.Save(FilePath);
