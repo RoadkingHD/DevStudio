@@ -24,13 +24,27 @@ namespace DevStudio.Debugger
         private readonly Dictionary<string, List<BreakpointBinding>> _byLine = new Dictionary<string, List<BreakpointBinding>>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, Dictionary<int, SortedList<int, int>>> _ilToLine = new Dictionary<string, Dictionary<int, SortedList<int, int>>>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<int, string> _methodNames = new Dictionary<int, string>();
-        private readonly Dictionary<int, Dictionary<int, string>> _localNames = new Dictionary<int, Dictionary<int, string>>();
+        private readonly Dictionary<int, List<PdbLocalScope>> _localScopes = new Dictionary<int, List<PdbLocalScope>>();
+        private readonly Dictionary<int, MethodArgumentInfo> _argumentInfo = new Dictionary<int, MethodArgumentInfo>();
         private MetadataReaderProvider _pdbProvider;
         private PEReader _peReader;
         private MetadataReader _pdbReader;
         private MetadataReader _peMetadataReader;
 
         public bool Loaded { get; private set; }
+
+        private sealed class PdbLocalScope
+        {
+            public int StartOffset;
+            public int Length;
+            public Dictionary<int, string> Variables;
+        }
+
+        private sealed class MethodArgumentInfo
+        {
+            public bool IsStatic;
+            public string[] ParameterNames;
+        }
 
         public SequencePointMap(string exePath)
         {
@@ -55,7 +69,27 @@ namespace DevStudio.Debugger
                         var name = _peMetadataReader.GetString(method.Name);
                         var declaringType = _peMetadataReader.GetTypeDefinition(method.GetDeclaringType());
                         var typeName = _peMetadataReader.GetString(declaringType.Name);
-                        _methodNames[MetadataTokens.GetToken(methodHandle)] = typeName + "." + name;
+                        var token = MetadataTokens.GetToken(methodHandle);
+                        _methodNames[token] = typeName + "." + name;
+                        var parameterNames = new List<string>();
+                        foreach (var parameterHandle in method.GetParameters().OrderBy(p => _peMetadataReader.GetParameter(p).SequenceNumber))
+                        {
+                            var parameter = _peMetadataReader.GetParameter(parameterHandle);
+                            if (parameter.SequenceNumber <= 0)
+                            {
+                                continue;
+                            }
+                            var parameterName = _peMetadataReader.GetString(parameter.Name);
+                            if (!string.IsNullOrEmpty(parameterName))
+                            {
+                                parameterNames.Add(parameterName);
+                            }
+                        }
+                        _argumentInfo[token] = new MethodArgumentInfo
+                        {
+                            IsStatic = (method.Attributes & System.Reflection.MethodAttributes.Static) != 0,
+                            ParameterNames = parameterNames.ToArray()
+                        };
                     }
                 }
 
@@ -125,23 +159,30 @@ namespace DevStudio.Debugger
         {
             try
             {
-                var names = new Dictionary<int, string>();
+                var scopes = new List<PdbLocalScope>();
                 foreach (var scopeHandle in _pdbReader.GetLocalScopes(debugInfoHandle))
                 {
                     var scope = _pdbReader.GetLocalScope(scopeHandle);
+                    var variables = new Dictionary<int, string>();
                     foreach (var variableHandle in scope.GetLocalVariables())
                     {
                         var variable = _pdbReader.GetLocalVariable(variableHandle);
                         var name = _pdbReader.GetString(variable.Name);
-                        if (!string.IsNullOrEmpty(name))
+                        if (!string.IsNullOrEmpty(name) && !variables.ContainsKey(variable.Index))
                         {
-                            names[variable.Index] = name;
+                            variables[variable.Index] = name;
                         }
                     }
+                    scopes.Add(new PdbLocalScope
+                    {
+                        StartOffset = scope.StartOffset,
+                        Length = scope.Length,
+                        Variables = variables
+                    });
                 }
-                if (names.Count > 0)
+                if (scopes.Count > 0)
                 {
-                    _localNames[methodToken] = names;
+                    _localScopes[methodToken] = scopes;
                 }
             }
             catch
@@ -149,15 +190,66 @@ namespace DevStudio.Debugger
             }
         }
 
-        public bool TryGetLocalName(int methodToken, int localIndex, out string name)
+        public bool HasLocalNames(int methodToken)
         {
-            name = null;
-            Dictionary<int, string> names;
-            if (!_localNames.TryGetValue(methodToken, out names))
+            List<PdbLocalScope> scopes;
+            if (!_localScopes.TryGetValue(methodToken, out scopes))
             {
                 return false;
             }
-            return names.TryGetValue(localIndex, out name);
+            foreach (var scope in scopes)
+            {
+                if (scope.Variables.Count > 0)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public bool TryGetLocalName(int methodToken, int localIndex, int ilOffset, out string name)
+        {
+            name = null;
+            List<PdbLocalScope> scopes;
+            if (!_localScopes.TryGetValue(methodToken, out scopes))
+            {
+                return false;
+            }
+            foreach (var scope in scopes)
+            {
+                if (ilOffset >= 0 && (ilOffset < scope.StartOffset || ilOffset >= scope.StartOffset + scope.Length))
+                {
+                    continue;
+                }
+                if (scope.Variables.TryGetValue(localIndex, out name))
+                {
+                    return true;
+                }
+            }
+            name = null;
+            return false;
+        }
+
+        public bool TryGetArgumentName(int methodToken, int argIndex, out string name)
+        {
+            name = null;
+            MethodArgumentInfo info;
+            if (!_argumentInfo.TryGetValue(methodToken, out info))
+            {
+                return false;
+            }
+            if (!info.IsStatic && argIndex == 0)
+            {
+                name = "this";
+                return true;
+            }
+            int parameterIndex = info.IsStatic ? argIndex : argIndex - 1;
+            if (parameterIndex < 0 || parameterIndex >= info.ParameterNames.Length)
+            {
+                return false;
+            }
+            name = info.ParameterNames[parameterIndex];
+            return true;
         }
 
         private static FileStream OpenShared(string path)

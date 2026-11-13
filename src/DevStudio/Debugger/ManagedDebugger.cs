@@ -481,15 +481,33 @@ namespace DevStudio.Debugger
                 {
                     int activeToken = 0;
                     try { activeToken = activeFrame.Function?.Token ?? 0; } catch { }
+                    int activeIlOffset = -1;
+                    try { activeIlOffset = activeIlFrame.IP.pnOffset; } catch { }
                     try
                     {
+                        bool hasLocalNames = _map != null && _map.HasLocalNames(activeToken);
+                        var shownNames = new HashSet<string>(StringComparer.Ordinal);
                         var locals = activeIlFrame.LocalVariables;
                         int index = 0;
                         foreach (var value in locals)
                         {
-                            string name;
-                            if (_map == null || !_map.TryGetLocalName(activeToken, index, out name))
+                            string name = null;
+                            bool named = _map != null && _map.TryGetLocalName(activeToken, index, activeIlOffset, out name);
+                            if (named)
                             {
+                                if (!shownNames.Add(name))
+                                {
+                                    index++;
+                                    continue;
+                                }
+                            }
+                            else
+                            {
+                                if (hasLocalNames)
+                                {
+                                    index++;
+                                    continue;
+                                }
                                 name = "local[" + index + "]";
                             }
                             info.Locals.Add(FormatValue(name, value));
@@ -501,7 +519,13 @@ namespace DevStudio.Debugger
                             int argIndex = 0;
                             foreach (var value in arguments)
                             {
-                                info.Locals.Add(FormatValue("arg[" + argIndex + "]", value));
+                                string argName = null;
+                                bool namedArg = _map != null && _map.TryGetArgumentName(activeToken, argIndex, out argName);
+                                if (!namedArg)
+                                {
+                                    argName = "arg[" + argIndex + "]";
+                                }
+                                info.Locals.Add(FormatValue(argName, value));
                                 argIndex++;
                             }
                         }
