@@ -95,12 +95,35 @@ namespace DevStudio.Theming
 
         private static void ApplyRecursive(Control control)
         {
-            if (control is PropertyGrid || control is WebBrowser)
+            if (control is PropertyGrid propertyGrid)
+            {
+                propertyGrid.BackColor = Background2;
+                propertyGrid.ForeColor = Text;
+                propertyGrid.LineColor = PanelBorder;
+                propertyGrid.CategoryForeColor = Text;
+                propertyGrid.CategorySplitterColor = PanelBorder;
+                propertyGrid.HelpBackColor = Window;
+                propertyGrid.HelpForeColor = Text;
+                propertyGrid.ViewBorderColor = PanelBorder;
+                propertyGrid.CommandsBackColor = Window;
+                propertyGrid.CommandsForeColor = Text;
+                propertyGrid.CommandsBorderColor = PanelBorder;
+                propertyGrid.SelectedItemWithFocusBackColor = Accent;
+                propertyGrid.SelectedItemWithFocusForeColor = Color.White;
+                return;
+            }
+
+            if (control is WebBrowser)
             {
                 return;
             }
 
-            if (control is TabControl tab)
+            if (control is DevStudio.Designer.DesignSurface)
+            {
+                control.BackColor = Current.IsDark ? Color.FromArgb(63, 63, 70) : Color.FromArgb(150, 150, 155);
+                control.ForeColor = Text;
+            }
+            else if (control is TabControl tab)
             {
                 tab.BackColor = Background2;
                 tab.ForeColor = Text;

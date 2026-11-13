@@ -25,7 +25,7 @@ namespace DevStudio.Designer
         public event Action<string> SourceChanged;
         public event Action ViewCodeRequested;
         public event Action<string> DiagnosticOutput;
-        public event Action<string> EventHandlerNeeded;
+        public event Action<string, string> EventHandlerNeeded;
 
         private static readonly string[] ToolboxControls =
         {
@@ -171,7 +171,7 @@ namespace DevStudio.Designer
             }
             if (EventHandlerNeeded != null)
             {
-                EventHandlerNeeded(handlerName);
+                EventHandlerNeeded(handlerName, _surface.Model.ClassName);
             }
             ViewCodeRequested?.Invoke();
         }

@@ -253,7 +253,7 @@ namespace DevStudio.UI
                 tab.InnerTabs.TabPages.Add(tab.DesignerPage);
                 page.Controls.Add(tab.InnerTabs);
                 designer.SourceChanged += text => WriteDesignerSource(designerPath, text);
-                designer.EventHandlerNeeded += handlerName => InsertEventHandlerMethod(path, designerPath, handlerName);
+                designer.EventHandlerNeeded += (handlerName, className) => InsertEventHandlerMethod(path, designerPath, handlerName, className);
                 designer.ViewCodeRequested += () => { tab.InnerTabs.SelectedTab = tab.CodePage; };
                 tab.InnerTabs.SelectedIndexChanged += (s, e) =>
                 {
@@ -329,12 +329,12 @@ namespace DevStudio.UI
             }
         }
 
-        private void InsertEventHandlerMethod(string mainPath, string designerPath, string handlerName)
+        private void InsertEventHandlerMethod(string mainPath, string designerPath, string handlerName, string className)
         {
             EditorTab mainTab;
             if (_tabsByPath.TryGetValue(mainPath, out mainTab) && mainPath != designerPath)
             {
-                var updated = InitializeComponentWriter.EnsureEventHandlerMethod(mainTab.Doc.Text, handlerName);
+                var updated = InitializeComponentWriter.EnsureEventHandlerMethod(mainTab.Doc.Text, handlerName, className);
                 if (updated != mainTab.Doc.Text)
                 {
                     mainTab.Editor.SetText(updated);

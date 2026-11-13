@@ -252,7 +252,7 @@ namespace DevStudio.Designer
             return true;
         }
 
-        public static string EnsureEventHandlerMethod(string sourceText, string handlerName)
+        public static string EnsureEventHandlerMethod(string sourceText, string handlerName, string className = null)
         {
             if (string.IsNullOrEmpty(sourceText) || string.IsNullOrEmpty(handlerName))
             {
@@ -273,16 +273,25 @@ namespace DevStudio.Designer
             {
                 return sourceText;
             }
-            var initMethod = root.DescendantNodes().OfType<MethodDeclarationSyntax>()
-                .FirstOrDefault(m => m.Identifier.ValueText == "InitializeComponent");
-            if (initMethod == null)
+            ClassDeclarationSyntax classDecl = null;
+            if (!string.IsNullOrEmpty(className))
             {
-                return sourceText;
+                classDecl = root.DescendantNodes().OfType<ClassDeclarationSyntax>()
+                    .LastOrDefault(c => c.Identifier.ValueText == className);
             }
-            var classDecl = initMethod.Ancestors().OfType<ClassDeclarationSyntax>().FirstOrDefault();
             if (classDecl == null)
             {
-                return sourceText;
+                var initMethod = root.DescendantNodes().OfType<MethodDeclarationSyntax>()
+                    .FirstOrDefault(m => m.Identifier.ValueText == "InitializeComponent");
+                if (initMethod == null)
+                {
+                    return sourceText;
+                }
+                classDecl = initMethod.Ancestors().OfType<ClassDeclarationSyntax>().FirstOrDefault();
+                if (classDecl == null)
+                {
+                    return sourceText;
+                }
             }
             var pad = new string(' ', classDecl.Parent is NamespaceDeclarationSyntax ? 8 : 4);
             var lastToken = classDecl.CloseBraceToken.GetPreviousToken();

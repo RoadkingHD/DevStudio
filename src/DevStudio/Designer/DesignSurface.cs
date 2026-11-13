@@ -161,8 +161,10 @@ namespace DevStudio.Designer
             _rootControl.Location = new Point(0, 0);
             _rootControl.Tag = "this";
             WireControl(_rootControl);
-            Location = new Point(12, 12);
-            Size = new Size(_rootControl.Width + 24, _rootControl.Height + 24);
+            Paint -= OnSurfacePaint;
+            Paint += OnSurfacePaint;
+            Location = new Point(8, 8);
+            Size = new Size(_rootControl.Width + 16, _rootControl.Height + 16);
 
             foreach (var control in model.Controls.Values.Where(c => !c.IsRoot))
             {
@@ -412,7 +414,7 @@ namespace DevStudio.Designer
                 DefaultEventRequested?.Invoke(control);
                 return;
             }
-            var handle = GetHandleAt(control.ClientRectangle, p);
+            var handle = GetHandleAt(GetDesignRect(control), p);
             if (handle != ResizeHandle.None)
             {
                 _resizing = handle;
@@ -484,13 +486,13 @@ namespace DevStudio.Designer
             {
                 return;
             }
-            Size = new Size(_rootControl.Width + 24, _rootControl.Height + 24);
+            Size = new Size(_rootControl.Width + 16, _rootControl.Height + 16);
         }
 
         internal void HandleHookSetCursor(Control control)
         {
             var p = control.PointToClient(Cursor.Position);
-            var cursor = GetCursor(GetHandleAt(control.ClientRectangle, p));
+            var cursor = GetCursor(GetHandleAt(GetDesignRect(control), p));
             if (cursor == null)
             {
                 cursor = ReferenceEquals(control, _rootControl) ? Cursors.Default : Cursors.SizeAll;
@@ -511,8 +513,8 @@ namespace DevStudio.Designer
                 right = Math.Max(right, control.Right);
                 bottom = Math.Max(bottom, control.Bottom);
             }
-            right += 12;
-            bottom += 12;
+            right += 8;
+            bottom += 8;
             if (Width < right || Height < bottom)
             {
                 Size = new Size(Math.Max(Width, right), Math.Max(Height, bottom));
@@ -697,25 +699,60 @@ namespace DevStudio.Designer
             _selected.Bounds = new Rectangle(left, top, right - left, bottom - top);
         }
 
+        private static Rectangle GetDesignRect(Control control)
+        {
+            var parent = control.Parent;
+            if (parent != null)
+            {
+                var origin = control.PointToClient(parent.PointToScreen(control.Bounds.Location));
+                return new Rectangle(origin, control.Size);
+            }
+            return control.ClientRectangle;
+        }
+
         private void OnControlPaint(object sender, PaintEventArgs e)
         {
             var control = (Control)sender;
+            if (ReferenceEquals(control, _rootControl))
+            {
+                return;
+            }
             if (ReferenceEquals(control, _selected))
             {
+                var designRect = GetDesignRect(control);
                 using (var pen = new Pen(Color.FromArgb(0, 122, 204), 1.5f))
                 {
-                    e.Graphics.DrawRectangle(pen, 0, 0, control.Width - 1, control.Height - 1);
+                    e.Graphics.DrawRectangle(pen, designRect.Left, designRect.Top, designRect.Width - 1, designRect.Height - 1);
                 }
-                foreach (var rect in GetHandleRects(control.ClientRectangle))
+                DrawHandleRects(e.Graphics, designRect);
+            }
+        }
+
+        private void OnSurfacePaint(object sender, PaintEventArgs e)
+        {
+            if (_rootControl == null || !ReferenceEquals(_selected, _rootControl))
+            {
+                return;
+            }
+            var bounds = _rootControl.Bounds;
+            using (var pen = new Pen(Color.FromArgb(0, 122, 204), 1.5f))
+            {
+                e.Graphics.DrawRectangle(pen, bounds.Left, bounds.Top, bounds.Width - 1, bounds.Height - 1);
+            }
+            DrawHandleRects(e.Graphics, bounds);
+        }
+
+        private void DrawHandleRects(Graphics graphics, Rectangle bounds)
+        {
+            foreach (var rect in GetHandleRects(bounds))
+            {
+                using (var brush = new SolidBrush(Color.White))
                 {
-                    using (var brush = new SolidBrush(Color.White))
-                    {
-                        e.Graphics.FillRectangle(brush, rect);
-                    }
-                    using (var pen = new Pen(Color.Black))
-                    {
-                        e.Graphics.DrawRectangle(pen, rect.Left, rect.Top, rect.Width - 1, rect.Height - 1);
-                    }
+                    graphics.FillRectangle(brush, rect);
+                }
+                using (var pen = new Pen(Color.Black))
+                {
+                    graphics.DrawRectangle(pen, rect.Left, rect.Top, rect.Width - 1, rect.Height - 1);
                 }
             }
         }
