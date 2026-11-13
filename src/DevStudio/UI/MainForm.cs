@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using DevStudio.Build;
@@ -50,6 +52,7 @@ namespace DevStudio.UI
             _cppBuilder = new CppBuildService(outputPanel.AppendLine);
             WireEvents();
             PopulateThemeMenu();
+            SetupSnippetMenu();
             if (args != null)
             {
                 foreach (var arg in args)
@@ -242,6 +245,7 @@ namespace DevStudio.UI
             if (hasDesigner)
             {
                 var designer = new DesignerHostControl { Dock = DockStyle.Fill };
+                UiTheme.Apply(designer);
                 designer.DiagnosticOutput += message => outputPanel.AppendLine(message);
                 tab.Designer = designer;
                 tab.InnerTabs = new TabControl { Dock = DockStyle.Fill };
@@ -638,6 +642,10 @@ namespace DevStudio.UI
                 SelectBottomTab("CallStack");
             }
             var frame = info.CallStack.FirstOrDefault(f => !string.IsNullOrEmpty(f.File));
+            if (!info.IsStep && info.ExceptionMessage == null && frame != null)
+            {
+                statusLabel.Text = "Breakpoint hit: " + Path.GetFileName(frame.File) + ":" + frame.Line;
+            }
             if (frame != null)
             {
                 NavigateTo(frame.File, frame.Line, 1);
@@ -943,6 +951,31 @@ namespace DevStudio.UI
                 {
                     return;
                 }
+                string proxyTarget = null;
+                List<string> proxyExports = null;
+                if (dialog.Language == DevLanguage.Cpp && dialog.OutputKind == OutputKindEx.Library && dialog.IsProxyDll)
+                {
+                    using (var fileDialog = new OpenFileDialog())
+                    {
+                        fileDialog.Title = "Select the original DLL to forward exports to";
+                        fileDialog.Filter = "Dynamic-Link Library (*.dll)|*.dll|All Files (*.*)|*.*";
+                        if (fileDialog.ShowDialog(this) != DialogResult.OK)
+                        {
+                            return;
+                        }
+                        try
+                        {
+                            proxyExports = PeExportReader.GetExportNames(fileDialog.FileName);
+                        }
+                        catch (Exception ex)
+                        {
+                            proxyExports = new List<string>();
+                            outputPanel.AppendLine("Warning: could not read exports from " + fileDialog.FileName + ": " + ex.Message);
+                        }
+                        proxyTarget = Path.GetFileNameWithoutExtension(fileDialog.FileName);
+                        outputPanel.AppendLine("Found " + proxyExports.Count + " exported functions in " + Path.GetFileName(fileDialog.FileName));
+                    }
+                }
                 CloseAllProjects();
                 Directory.CreateDirectory(dialog.ProjectDirectory);
                 ProjectBase project;
@@ -999,9 +1032,16 @@ namespace DevStudio.UI
                     var mainPath = Path.Combine(dialog.ProjectDirectory, "main.cpp");
                     if (!File.Exists(mainPath))
                     {
-                        File.WriteAllText(mainPath, dialog.OutputKind == OutputKindEx.Library
-                            ? NewCppLibraryTemplate(dialog.ProjectName, dialog.IsProxyDll)
-                            : NewCppTemplate());
+                        if (dialog.OutputKind == OutputKindEx.Library && dialog.IsProxyDll && proxyTarget != null && proxyExports != null)
+                        {
+                            File.WriteAllText(mainPath, NewCppProxyTemplate(proxyTarget, proxyExports));
+                        }
+                        else
+                        {
+                            File.WriteAllText(mainPath, dialog.OutputKind == OutputKindEx.Library
+                                ? NewCppLibraryTemplate(dialog.ProjectName, false)
+                                : NewCppTemplate());
+                        }
                     }
                     ((CppProject)project).AddFile(mainPath);
                 }
@@ -1387,12 +1427,80 @@ namespace DevStudio.UI
 
         private void AboutClick(object sender, EventArgs e)
         {
-            MessageBox.Show(this,
-                "DevStudio\n\nA lightweight development studio for C# and C/C++.\n\n" +
-                "C#: Roslyn editor services, in-process compiler, ICorDebug debugger,\nWinForms designer, DLL references.\n\n" +
-                "C/C++: external MinGW (g++) compiler.\n\n" +
-                "Shortcuts: F5 Start, F6 Build, F9 Breakpoint, F10 Step Over, F11 Step Into,\nCtrl+F Find in Files, Ctrl+G Go To Line.",
-                "About DevStudio", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            using (var dialog = new AboutDialog())
+            {
+                dialog.ShowDialog(this);
+            }
+        }
+
+        private void SetupSnippetMenu()
+        {
+            var snippetMenu = new ToolStripMenuItem("Insert Snippet");
+            var csharpItem = new ToolStripMenuItem("Run as Administrator (C#)", null, (s, e) => InsertSnippet(CSharpElevateSnippet));
+            var cppItem = new ToolStripMenuItem("Run as Administrator (C++)", null, (s, e) => InsertSnippet(CppElevateSnippet));
+            snippetMenu.DropDownItems.Add(csharpItem);
+            snippetMenu.DropDownItems.Add(cppItem);
+            editMenu.DropDownItems.Insert(0, snippetMenu);
+            editMenu.DropDownItems.Insert(1, new ToolStripSeparator());
+        }
+
+        private void InsertSnippet(string snippet)
+        {
+            var tab = ActiveTab;
+            if (tab == null)
+            {
+                return;
+            }
+            tab.Editor.InsertAtCaret(snippet);
+        }
+
+        private const string CSharpElevateSnippet =
+            "var startInfo = new System.Diagnostics.ProcessStartInfo\r\n" +
+            "{\r\n" +
+            "    FileName = \"cmd.exe\",\r\n" +
+            "    Arguments = \"/k\",\r\n" +
+            "    UseShellExecute = true,\r\n" +
+            "    Verb = \"runas\"\r\n" +
+            "};\r\n" +
+            "System.Diagnostics.Process.Start(startInfo);";
+
+        private const string CppElevateSnippet =
+            "SHELLEXECUTEINFO executeInfo = { 0 };\r\n" +
+            "executeInfo.cbSize = sizeof(SHELLEXECUTEINFO);\r\n" +
+            "executeInfo.lpVerb = TEXT(\"runas\");\r\n" +
+            "executeInfo.lpFile = TEXT(\"cmd.exe\");\r\n" +
+            "executeInfo.nShow = SW_SHOW;\r\n" +
+            "ShellExecuteEx(&executeInfo);";
+
+        private static string NewCppProxyTemplate(string moduleName, List<string> exports)
+        {
+            var nl = Environment.NewLine;
+            var sb = new StringBuilder();
+            sb.Append("// Proxy DLL - forwards all exported functions to " + moduleName + ".dll." + nl);
+            sb.Append("// Build with the MSVC linker for /export forwarding; MinGW ignores #pragma comment." + nl);
+            sb.Append("#include <windows.h>" + nl);
+            sb.Append(nl);
+            var identifierRegex = new Regex("^[A-Za-z_][A-Za-z0-9_]*$");
+            foreach (var export in exports)
+            {
+                if (!identifierRegex.IsMatch(export))
+                {
+                    continue;
+                }
+                sb.Append("#pragma comment(linker, \"/export:" + export + "=" + moduleName + "." + export + "\")" + nl);
+            }
+            sb.Append(nl);
+            sb.Append("BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)" + nl);
+            sb.Append("{" + nl);
+            sb.Append("    switch (reason)" + nl);
+            sb.Append("    {" + nl);
+            sb.Append("        case DLL_PROCESS_ATTACH:" + nl);
+            sb.Append("        case DLL_PROCESS_DETACH:" + nl);
+            sb.Append("            break;" + nl);
+            sb.Append("    }" + nl);
+            sb.Append("    return TRUE;" + nl);
+            sb.Append("}" + nl);
+            return sb.ToString();
         }
 
         private void MainFormFormClosing(object sender, FormClosingEventArgs e)

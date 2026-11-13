@@ -183,6 +183,12 @@ namespace DevStudio.Editor
             _tb.Text = text ?? "";
         }
 
+        public void InsertAtCaret(string text)
+        {
+            _tb.InsertText(text);
+            _tb.Focus();
+        }
+
         public void GetCaretLocation(out int line, out int column)
         {
             var place = _tb.Selection.Start;
@@ -616,6 +622,7 @@ namespace DevStudio.Editor
                 range.SetStyle(_stringStyle, "@?\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*'", RegexOptions.Singleline);
                 range.SetStyle(_preprocessorStyle, @"^\s*#\s*\w+.*$", RegexOptions.Multiline);
                 range.SetStyle(_keywordStyle, CppKeywordsPattern, RegexOptions.IgnoreCase);
+                range.SetStyle(_typeStyle, CppTypesPattern);
                 range.SetStyle(_numberStyle, @"\b0[xX][0-9a-fA-F]+\b|\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?[fFuUlL]*\b");
                 _tb.Invalidate();
             }
@@ -625,7 +632,10 @@ namespace DevStudio.Editor
         }
 
         private static readonly string CppKeywordsPattern =
-            @"\b(alignas|alignof|and|asm|auto|bool|break|case|catch|char|char8_t|char16_t|char32_t|class|compl|concept|const|consteval|constexpr|constinit|const_cast|continue|co_await|co_return|co_yield|decltype|default|delete|do|double|dynamic_cast|else|enum|explicit|export|extern|false|float|for|friend|goto|if|inline|int|long|mutable|namespace|new|noexcept|not|nullptr|operator|or|private|protected|public|register|reinterpret_cast|requires|return|short|signed|sizeof|static|static_assert|static_cast|struct|switch|template|this|thread_local|throw|true|try|typedef|typeid|typename|union|unsigned|using|virtual|void|volatile|wchar_t|while|xor|NULL)\b";
+            @"\b(alignas|alignof|and|asm|auto|bool|break|case|catch|char|char8_t|char16_t|char32_t|class|compl|concept|const|consteval|constexpr|constinit|const_cast|continue|co_await|co_return|co_yield|decltype|default|delete|do|double|dynamic_cast|else|enum|explicit|export|extern|false|float|for|friend|goto|if|inline|int|long|mutable|namespace|new|noexcept|not|nullptr|operator|or|private|protected|public|register|reinterpret_cast|requires|return|short|signed|sizeof|static|static_assert|static_cast|struct|switch|template|this|thread_local|throw|true|try|typedef|typeid|typename|union|unsigned|using|virtual|void|volatile|wchar_t|while|xor|NULL|__declspec|__stdcall|__cdecl|__fastcall|__thiscall|__int64|__try|__except|__finally|__leave)\b";
+
+        private static readonly string CppTypesPattern =
+            @"\b(DWORD|WORD|BYTE|BOOL|BOOLEAN|HANDLE|HWND|HINSTANCE|HMODULE|HKEY|LPARAM|LPCSTR|LPCVOID|LPCWSTR|LPSTR|LPVOID|LPWSTR|LRESULT|WPARAM|UINT|ULONG|ULONGLONG|USHORT|SIZE_T|SSIZE_T|HRESULT|SCODE|COLORREF|FILETIME|GUID|IID|CLSID|LARGE_INTEGER|ULARGE_INTEGER|OVERLAPPED|SECURITY_ATTRIBUTES|CRITICAL_SECTION|CONDITION_VARIABLE|SRWLOCK|std|string|wstring|u16string|u32string|vector|deque|list|map|unordered_map|multimap|set|unordered_set|multiset|pair|tuple|array|queue|stack|shared_ptr|unique_ptr|weak_ptr|function|size_t|ssize_t|ptrdiff_t|int8_t|int16_t|int32_t|int64_t|uint8_t|uint16_t|uint32_t|uint64_t|intptr_t|uintptr_t|time_t|errno_t)\b";
 
         private void BuildContextMenu()
         {
