@@ -404,7 +404,8 @@ namespace DevStudio.Designer
             }
             if (targetType != null && targetType.IsEnum)
             {
-                return targetType.FullName + "." + value;
+                var names = value.ToString().Split(new[] { ", " }, StringSplitOptions.RemoveEmptyEntries);
+                return string.Join(" | ", names.Select(n => targetType.FullName + "." + n.Trim()));
             }
             if (value is bool)
             {
@@ -416,9 +417,40 @@ namespace DevStudio.Designer
             }
             if (value is float)
             {
-                return value + "F";
+                return ((float)value).ToString(System.Globalization.CultureInfo.InvariantCulture) + "F";
             }
-            return value.ToString();
+            if (value is decimal || value is byte || value is sbyte || value is short || value is ushort ||
+                value is int || value is uint || value is long || value is ulong || value is double)
+            {
+                return Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture);
+            }
+            if (value.GetType().FullName == "System.Windows.Forms.Padding")
+            {
+                var padType = value.GetType();
+                var left = (int)padType.GetProperty("Left").GetValue(value, null);
+                var top = (int)padType.GetProperty("Top").GetValue(value, null);
+                var right = (int)padType.GetProperty("Right").GetValue(value, null);
+                var bottom = (int)padType.GetProperty("Bottom").GetValue(value, null);
+                return "new System.Windows.Forms.Padding(" + left + ", " + top + ", " + right + ", " + bottom + ")";
+            }
+            if (value is SizeF)
+            {
+                var sizeF = (SizeF)value;
+                return "new System.Drawing.SizeF(" + sizeF.Width.ToString(System.Globalization.CultureInfo.InvariantCulture) + "F, "
+                    + sizeF.Height.ToString(System.Globalization.CultureInfo.InvariantCulture) + "F)";
+            }
+            if (value is PointF)
+            {
+                var pointF = (PointF)value;
+                return "new System.Drawing.PointF(" + pointF.X.ToString(System.Globalization.CultureInfo.InvariantCulture) + "F, "
+                    + pointF.Y.ToString(System.Globalization.CultureInfo.InvariantCulture) + "F)";
+            }
+            if (value is Rectangle)
+            {
+                var rect = (Rectangle)value;
+                return "new System.Drawing.Rectangle(" + rect.X + ", " + rect.Y + ", " + rect.Width + ", " + rect.Height + ")";
+            }
+            return null;
         }
     }
 }

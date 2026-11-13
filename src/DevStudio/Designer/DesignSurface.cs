@@ -101,6 +101,7 @@ namespace DevStudio.Designer
         private void LoadModelCore(DesignerModel model)
         {
             int width = 640, height = 480;
+            bool sizeIsClient = false;
             var clientSize = model.Root.Properties["ClientSize"];
             if (clientSize != null)
             {
@@ -109,16 +110,20 @@ namespace DevStudio.Designer
                 {
                     width = size.Value.Width;
                     height = size.Value.Height;
+                    sizeIsClient = true;
                 }
             }
-            var sizeProp = model.Root.Properties["Size"];
-            if (sizeProp != null)
+            if (!sizeIsClient)
             {
-                var size = (Size?)DesignerExpressionEvaluator.Evaluate(sizeProp, typeof(Size));
-                if (size.HasValue)
+                var sizeProp = model.Root.Properties["Size"];
+                if (sizeProp != null)
                 {
-                    width = size.Value.Width;
-                    height = size.Value.Height;
+                    var size = (Size?)DesignerExpressionEvaluator.Evaluate(sizeProp, typeof(Size));
+                    if (size.HasValue)
+                    {
+                        width = size.Value.Width;
+                        height = size.Value.Height;
+                    }
                 }
             }
 
@@ -127,12 +132,19 @@ namespace DevStudio.Designer
             {
                 _rootControl = CreatePlaceholder(width, height);
             }
-            _rootControl.Size = new Size(width, height);
+            if (sizeIsClient)
+            {
+                _rootControl.ClientSize = new Size(width, height);
+            }
+            else
+            {
+                _rootControl.Size = new Size(width, height);
+            }
             _rootControl.Location = new Point(0, 0);
             _rootControl.Tag = "this";
             WireEvents(_rootControl);
             Location = new Point(12, 12);
-            Size = new Size(width + 24, height + 24);
+            Size = new Size(_rootControl.Width + 24, _rootControl.Height + 24);
 
             foreach (var control in model.Controls.Values.Where(c => !c.IsRoot))
             {
@@ -228,7 +240,8 @@ namespace DevStudio.Designer
                 if (form != null)
                 {
                     form.TopLevel = false;
-                    form.FormBorderStyle = FormBorderStyle.None;
+                    form.ControlBox = false;
+                    form.WindowState = FormWindowState.Normal;
                     form.StartPosition = FormStartPosition.Manual;
                     if (!form.Visible)
                     {
@@ -257,6 +270,16 @@ namespace DevStudio.Designer
                 BackColor = Color.FromArgb(200, 200, 205),
                 BorderStyle = BorderStyle.FixedSingle
             };
+        }
+
+        private static readonly HashSet<string> RootDesignBlocked = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "TopLevel", "Visible", "Location", "WindowState"
+        };
+
+        public bool IsDesignBlocked(Control control, string propertyName)
+        {
+            return ReferenceEquals(control, _rootControl) && RootDesignBlocked.Contains(propertyName);
         }
 
         private static void ApplyProperty(Control instance, string propertyName, string expression)
@@ -546,7 +569,12 @@ namespace DevStudio.Designer
             }
             var propertyInfo = control.GetType().GetProperty(property);
             var type = propertyInfo != null ? propertyInfo.PropertyType : null;
-            info.Properties[property] = DesignerExpressionEvaluator.ToSourceExpression(value, type);
+            var expression = DesignerExpressionEvaluator.ToSourceExpression(value, type);
+            if (expression == null)
+            {
+                return;
+            }
+            info.Properties[property] = expression;
             ModelChanged?.Invoke();
         }
 

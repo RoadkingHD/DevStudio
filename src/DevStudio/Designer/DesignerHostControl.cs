@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Drawing;
+using System.Globalization;
 using System.Linq;
 using System.Windows.Forms;
 
@@ -230,8 +232,13 @@ namespace DevStudio.Designer
             }
         }
 
-        private sealed class ControlPropertyAdapter
+        private sealed class ControlPropertyAdapter : ICustomTypeDescriptor
         {
+            private static readonly HashSet<string> HiddenProperties = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "Tag", "DataBindings", "Controls", "Parent", "Site"
+            };
+
             private readonly DesignSurface _surface;
             private readonly Control _control;
 
@@ -241,108 +248,146 @@ namespace DevStudio.Designer
                 _control = control;
             }
 
-            [System.ComponentModel.Browsable(true)]
-            [System.ComponentModel.Category("Design")]
-            public string Name
+            AttributeCollection ICustomTypeDescriptor.GetAttributes()
             {
-                get { return (string)_control.Tag ?? "(this)"; }
+                return TypeDescriptor.GetAttributes(_control);
             }
 
-            [System.ComponentModel.Browsable(true)]
-            [System.ComponentModel.Category("Appearance")]
-            public string Text
+            string ICustomTypeDescriptor.GetClassName()
             {
-                get { return _control.Text; }
-                set
-                {
-                    _control.Text = value;
-                    _surface.UpdateModelProperty(_control, "Text", value);
-                    _control.Invalidate();
-                }
+                return _control.GetType().Name;
             }
 
-            [System.ComponentModel.Browsable(true)]
-            [System.ComponentModel.Category("Layout")]
-            public Point Location
+            string ICustomTypeDescriptor.GetComponentName()
             {
-                get { return _control.Location; }
-                set
-                {
-                    _control.Location = value;
-                    _surface.UpdateModelProperty(_control, "Location", value);
-                }
+                return (string)_control.Tag ?? "(root)";
             }
 
-            [System.ComponentModel.Browsable(true)]
-            [System.ComponentModel.Category("Layout")]
-            public Size Size
+            TypeConverter ICustomTypeDescriptor.GetConverter()
             {
-                get { return _control.Size; }
-                set
-                {
-                    _control.Size = value;
-                    _surface.UpdateModelProperty(_control, "Size", value);
-                }
+                return TypeDescriptor.GetConverter(_control);
             }
 
-            [System.ComponentModel.Browsable(true)]
-            [System.ComponentModel.Category("Behavior")]
-            public bool Visible
+            EventDescriptor ICustomTypeDescriptor.GetDefaultEvent()
             {
-                get { return _control.Visible; }
-                set
-                {
-                    _control.Visible = value;
-                    _surface.UpdateModelProperty(_control, "Visible", value);
-                }
+                return TypeDescriptor.GetDefaultEvent(_control);
             }
 
-            [System.ComponentModel.Browsable(true)]
-            [System.ComponentModel.Category("Behavior")]
-            public bool Enabled
+            PropertyDescriptor ICustomTypeDescriptor.GetDefaultProperty()
             {
-                get { return _control.Enabled; }
-                set
-                {
-                    _control.Enabled = value;
-                    _surface.UpdateModelProperty(_control, "Enabled", value);
-                }
+                return TypeDescriptor.GetDefaultProperty(_control);
             }
 
-            [System.ComponentModel.Browsable(true)]
-            [System.ComponentModel.Category("Appearance")]
-            public Color BackColor
+            object ICustomTypeDescriptor.GetEditor(Type editorBaseType)
             {
-                get { return _control.BackColor; }
-                set
-                {
-                    _control.BackColor = value;
-                    _surface.UpdateModelProperty(_control, "BackColor", value);
-                }
+                return TypeDescriptor.GetEditor(_control, editorBaseType);
             }
 
-            [System.ComponentModel.Browsable(true)]
-            [System.ComponentModel.Category("Appearance")]
-            public Color ForeColor
+            EventDescriptorCollection ICustomTypeDescriptor.GetEvents()
             {
-                get { return _control.ForeColor; }
-                set
-                {
-                    _control.ForeColor = value;
-                    _surface.UpdateModelProperty(_control, "ForeColor", value);
-                }
+                return new EventDescriptorCollection(new EventDescriptor[0]);
             }
 
-            [System.ComponentModel.Browsable(true)]
-            [System.ComponentModel.Category("Appearance")]
-            public Font Font
+            EventDescriptorCollection ICustomTypeDescriptor.GetEvents(Attribute[] attributes)
             {
-                get { return _control.Font; }
-                set
+                return new EventDescriptorCollection(new EventDescriptor[0]);
+            }
+
+            PropertyDescriptorCollection ICustomTypeDescriptor.GetProperties()
+            {
+                return ((ICustomTypeDescriptor)this).GetProperties(null);
+            }
+
+            PropertyDescriptorCollection ICustomTypeDescriptor.GetProperties(Attribute[] attributes)
+            {
+                var descriptors = new List<PropertyDescriptor>();
+                foreach (PropertyDescriptor property in TypeDescriptor.GetProperties(_control, attributes))
                 {
-                    _control.Font = value;
-                    _surface.UpdateModelProperty(_control, "Font", value);
+                    if (!property.IsBrowsable || HiddenProperties.Contains(property.Name))
+                    {
+                        continue;
+                    }
+                    descriptors.Add(new ModelPropertyDescriptor(property, _surface, _control));
                 }
+                return new PropertyDescriptorCollection(descriptors.ToArray());
+            }
+
+            object ICustomTypeDescriptor.GetPropertyOwner(PropertyDescriptor pd)
+            {
+                return this;
+            }
+        }
+
+        private sealed class ModelPropertyDescriptor : PropertyDescriptor
+        {
+            private readonly PropertyDescriptor _base;
+            private readonly DesignSurface _surface;
+            private readonly Control _control;
+
+            public ModelPropertyDescriptor(PropertyDescriptor baseDescriptor, DesignSurface surface, Control control)
+                : base(baseDescriptor, null)
+            {
+                _base = baseDescriptor;
+                _surface = surface;
+                _control = control;
+            }
+
+            public override Type ComponentType
+            {
+                get { return _base.ComponentType; }
+            }
+
+            public override Type PropertyType
+            {
+                get { return _base.PropertyType; }
+            }
+
+            public override bool IsReadOnly
+            {
+                get { return _base.IsReadOnly; }
+            }
+
+            public override bool CanResetValue(object component)
+            {
+                return _base.CanResetValue(_control);
+            }
+
+            public override object GetValue(object component)
+            {
+                return _base.GetValue(_control);
+            }
+
+            public override void ResetValue(object component)
+            {
+                _base.ResetValue(_control);
+                PushValue();
+                _control.Invalidate();
+            }
+
+            public override void SetValue(object component, object value)
+            {
+                if (!_surface.IsDesignBlocked(_control, Name))
+                {
+                    try
+                    {
+                        _base.SetValue(_control, value);
+                    }
+                    catch
+                    {
+                    }
+                }
+                PushValue();
+                _control.Invalidate();
+            }
+
+            public override bool ShouldSerializeValue(object component)
+            {
+                return _base.ShouldSerializeValue(_control);
+            }
+
+            private void PushValue()
+            {
+                _surface.UpdateModelProperty(_control, Name, GetValue(null));
             }
         }
     }
