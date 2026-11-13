@@ -470,7 +470,7 @@ namespace DevStudio.UI
 
         private async void StartDebugClick(object sender, EventArgs e)
         {
-            if (_debugger.IsStopped)
+            if (_debugger.IsRunning && _debugger.IsStopped)
             {
                 _debugger.Continue();
                 return;
@@ -514,17 +514,27 @@ namespace DevStudio.UI
             UpdateDebugUi();
         }
 
-        private void StartWithoutDebugClick(object sender, EventArgs e)
+        private async void StartWithoutDebugClick(object sender, EventArgs e)
         {
+            if (_debugger.IsRunning || _building)
+            {
+                return;
+            }
             var project = ActiveProject;
             if (project == null)
+            {
+                outputPanel.AppendLine("No project is loaded.");
+                return;
+            }
+            await BuildInternal(false);
+            if (_building || buildStatusLabel.Text == "Build failed")
             {
                 return;
             }
             var exe = project.FullOutputPath;
             if (!File.Exists(exe))
             {
-                outputPanel.AppendLine("Executable not found: " + exe + ". Build the project first.");
+                outputPanel.AppendLine("Executable not found: " + exe);
                 return;
             }
             if (project.Language == DevLanguage.Cpp)
