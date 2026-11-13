@@ -6,6 +6,7 @@ using System.Linq;
 using System.Windows.Forms;
 using DevStudio.Projects;
 using DevStudio.Theming;
+using DevStudio.UI;
 
 namespace DevStudio.Panels
 {
@@ -32,6 +33,7 @@ namespace DevStudio.Panels
         public SolutionExplorerPanel()
         {
             InitializeComponent();
+            projectTree.ImageList = StudioIcons.CreateTreeImageList();
             projectTree.MouseDown += (s, e) =>
             {
                 if (e.Button == MouseButtons.Right)
@@ -86,19 +88,32 @@ namespace DevStudio.Panels
         {
             var node = new TreeNode(project.Name)
             {
-                Tag = project
+                Tag = project,
+                ImageKey = project.Language == DevLanguage.CSharp ? "ProjectCs" : "ProjectCpp",
+                SelectedImageKey = project.Language == DevLanguage.CSharp ? "ProjectCs" : "ProjectCpp"
             };
             foreach (var item in project.Items)
             {
+                string key = GetFileIconKey(item.DisplayName);
                 node.Nodes.Add(new TreeNode(item.DisplayName)
                 {
-                    Tag = item
+                    Tag = item,
+                    ImageKey = key,
+                    SelectedImageKey = key
                 });
             }
-            var referencesNode = new TreeNode("References");
+            var referencesNode = new TreeNode("References")
+            {
+                ImageKey = "References",
+                SelectedImageKey = "References"
+            };
             foreach (var reference in project.References)
             {
-                referencesNode.Nodes.Add(new TreeNode(reference.ToString()));
+                referencesNode.Nodes.Add(new TreeNode(reference.ToString())
+                {
+                    ImageKey = "References",
+                    SelectedImageKey = "References"
+                });
             }
             if (referencesNode.Nodes.Count > 0)
             {
@@ -106,6 +121,24 @@ namespace DevStudio.Panels
             }
             node.Expand();
             return node;
+        }
+
+        private static string GetFileIconKey(string fileName)
+        {
+            string ext = System.IO.Path.GetExtension(fileName ?? "").ToLowerInvariant();
+            switch (ext)
+            {
+                case ".cs": return "FileCs";
+                case ".cpp":
+                case ".cc":
+                case ".cxx": return "FileCpp";
+                case ".c": return "FileC";
+                case ".h":
+                case ".hpp": return "FileH";
+                case ".csproj": return "FileCsproj";
+                case ".vcxproj": return "FileVcxproj";
+                default: return "FileOther";
+            }
         }
 
         public void RefreshProject(ProjectBase project)

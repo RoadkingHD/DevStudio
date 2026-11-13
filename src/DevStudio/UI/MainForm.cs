@@ -43,6 +43,7 @@ namespace DevStudio.UI
         public MainForm(string[] args)
         {
             InitializeComponent();
+            ApplyToolbarIcons();
             _csharpBuilder = new CSharpBuildService(outputPanel.AppendLine);
             _cppBuilder = new CppBuildService(outputPanel.AppendLine);
             WireEvents();
@@ -56,6 +57,24 @@ namespace DevStudio.UI
             }
             UiTheme.SetTheme(EditorTheme.Dark, this);
             UpdateDebugUi();
+        }
+
+        private void ApplyToolbarIcons()
+        {
+            newButton.Image = StudioIcons.Get("New");
+            openButton.Image = StudioIcons.Get("Open");
+            saveButton.Image = StudioIcons.Get("Save");
+            buildButton.Image = StudioIcons.Get("Build");
+            startButton.Image = StudioIcons.Get("Start");
+            stopButton.Image = StudioIcons.Get("Stop");
+            stepOverButton.Image = StudioIcons.Get("StepOver");
+            stepIntoButton.Image = StudioIcons.Get("StepInto");
+            stepOutButton.Image = StudioIcons.Get("StepOut");
+            ToolStripItem[] items = { newButton, openButton, saveButton, buildButton, startButton, stopButton, stepOverButton, stepIntoButton, stepOutButton };
+            foreach (var item in items)
+            {
+                item.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
+            }
         }
 
         private void WireEvents()

@@ -25,6 +25,13 @@ namespace DevStudio.Designer
         {
             DoubleBuffered = true;
             BackColor = Color.FromArgb(150, 150, 155);
+            MouseDown += (s, e) =>
+            {
+                if (_rootControl != null)
+                {
+                    Select(_rootControl);
+                }
+            };
         }
 
         public Control SelectedControl
@@ -103,8 +110,8 @@ namespace DevStudio.Designer
             }
             _rootControl.Size = new Size(width, height);
             _rootControl.Location = new Point(0, 0);
-            _rootControl.Enabled = false;
             _rootControl.Tag = "this";
+            WireEvents(_rootControl);
 
             foreach (var control in model.Controls.Values.Where(c => !c.IsRoot))
             {
@@ -116,11 +123,18 @@ namespace DevStudio.Designer
                 instance.Tag = control.Name;
                 WireEvents(instance);
                 var parent = FindParentControl(control) ?? _rootControl;
-                parent.Controls.Add(instance);
+                try
+                {
+                    parent.Controls.Add(instance);
+                }
+                catch
+                {
+                }
             }
 
             Controls.Add(_rootControl);
             _rootControl.BringToFront();
+            Select(_rootControl);
         }
 
         private Control FindParentControl(ControlInfo info)
@@ -175,21 +189,21 @@ namespace DevStudio.Designer
                 }
                 var instance = (Control)Activator.CreateInstance(type);
                 var form = instance as Form;
-                if (form != null)
-                {
-                    form.TopLevel = false;
-                    form.FormBorderStyle = FormBorderStyle.None;
-                }
                 instance.Name = info.IsRoot ? "" : info.Name;
-                instance.Enabled = false;
 
                 foreach (var property in info.Properties.Entries)
                 {
                     ApplyProperty(instance, property.Key, property.Value);
                 }
-                if (form != null && !instance.Visible)
+                if (form != null)
                 {
-                    instance.Visible = true;
+                    form.TopLevel = false;
+                    form.FormBorderStyle = FormBorderStyle.None;
+                    form.StartPosition = FormStartPosition.Manual;
+                    if (!form.Visible)
+                    {
+                        form.Visible = true;
+                    }
                 }
                 return instance;
             }
@@ -241,6 +255,10 @@ namespace DevStudio.Designer
         {
             var control = (Control)sender;
             Select(control);
+            if (ReferenceEquals(control, _rootControl))
+            {
+                return;
+            }
             _dragging = true;
             _dragStart = control.PointToScreen(e.Location);
             _dragStartBounds = control.Bounds;

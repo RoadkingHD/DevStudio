@@ -360,32 +360,33 @@ namespace DevStudio.Projects
                 return;
             }
 
-            var itemGroups = root.Elements("ItemGroup").ToList();
-            XElement compileGroup = itemGroups.FirstOrDefault(g => g.Elements("Compile").Any());
-            XElement refGroup = itemGroups.FirstOrDefault(g => g.Elements("Reference").Any());
+            XNamespace ns = root.Name.Namespace;
+            var itemGroups = root.Elements(ns + "ItemGroup").ToList();
+            XElement compileGroup = itemGroups.FirstOrDefault(g => g.Elements(ns + "Compile").Any());
+            XElement refGroup = itemGroups.FirstOrDefault(g => g.Elements(ns + "Reference").Any());
 
             if (compileGroup == null)
             {
-                compileGroup = new XElement("ItemGroup");
+                compileGroup = new XElement(ns + "ItemGroup");
                 root.Add(compileGroup);
             }
 
             foreach (var item in Items)
             {
                 var rel = MakeRelative(ProjectDirectory, item.FullPath);
-                if (!compileGroup.Elements("Compile").Any(e => string.Equals((string)e.Attribute("Include"), rel, StringComparison.OrdinalIgnoreCase)))
+                if (!compileGroup.Elements(ns + "Compile").Any(e => string.Equals((string)e.Attribute("Include"), rel, StringComparison.OrdinalIgnoreCase)))
                 {
-                    compileGroup.Add(new XElement("Compile", new XAttribute("Include", rel)));
+                    compileGroup.Add(new XElement(ns + "Compile", new XAttribute("Include", rel)));
                 }
             }
 
             var knownRefs = new HashSet<string>(References.Select(r => r.AssemblyName ?? r.HintPath), StringComparer.OrdinalIgnoreCase);
             if (refGroup == null)
             {
-                refGroup = new XElement("ItemGroup");
+                refGroup = new XElement(ns + "ItemGroup");
                 root.Add(refGroup);
             }
-            foreach (var rf in refGroup.Elements("Reference").ToList())
+            foreach (var rf in refGroup.Elements(ns + "Reference").ToList())
             {
                 var name = ((string)rf.Attribute("Include") ?? "").Split(',')[0].Trim();
                 if (!knownRefs.Contains(name))
@@ -395,16 +396,16 @@ namespace DevStudio.Projects
             }
             foreach (var r in References)
             {
-                var existing = refGroup.Elements("Reference").FirstOrDefault(e =>
+                var existing = refGroup.Elements(ns + "Reference").FirstOrDefault(e =>
                     string.Equals(((string)e.Attribute("Include") ?? "").Split(',')[0].Trim(), r.AssemblyName ?? r.HintPath, StringComparison.OrdinalIgnoreCase));
                 if (existing != null)
                 {
                     continue;
                 }
-                var el = new XElement("Reference", new XAttribute("Include", r.AssemblyName ?? Path.GetFileNameWithoutExtension(r.HintPath)));
+                var el = new XElement(ns + "Reference", new XAttribute("Include", r.AssemblyName ?? Path.GetFileNameWithoutExtension(r.HintPath)));
                 if (!string.IsNullOrEmpty(r.HintPath))
                 {
-                    el.Add(new XElement("HintPath", MakeRelative(ProjectDirectory, r.HintPath)));
+                    el.Add(new XElement(ns + "HintPath", MakeRelative(ProjectDirectory, r.HintPath)));
                 }
                 refGroup.Add(el);
             }

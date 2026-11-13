@@ -90,6 +90,7 @@ namespace DevStudio.Designer
             var model = InitializeComponentParser.Parse(sourceText);
             _surface.LoadModel(model.Valid ? model : null);
             _updating = false;
+            _surface.Select(_surface.RootControl);
         }
 
         private void OnSelectionChanged(Control control)
@@ -139,6 +140,7 @@ namespace DevStudio.Designer
 
             ApplyToSource();
             ReloadSurface();
+            _toolbox.SelectedIndex = -1;
         }
 
         private void ReloadSurface()

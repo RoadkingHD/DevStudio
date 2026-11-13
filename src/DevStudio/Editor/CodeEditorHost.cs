@@ -9,6 +9,7 @@ using System.Windows.Forms;
 using DevStudio.Projects;
 using DevStudio.Services;
 using DevStudio.Theming;
+using DevStudio.UI;
 using FastColoredTextBoxNS;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Classification;
@@ -485,9 +486,10 @@ namespace DevStudio.Editor
                 MinFragmentLength = 1,
                 AppearInterval = 300,
                 AllowTabKey = true,
-                SearchPattern = @"[\w]",
+                SearchPattern = @"[\w\.]",
                 Font = new Font("Segoe UI", 9f)
             };
+            _autocomplete.ImageList = StudioIcons.CreateCompletionImageList();
             _autocomplete.SelectedColor = UiTheme.Accent;
             _autocomplete.HoveredColor = UiTheme.PanelBorder;
             _autocomplete.Opening += (s, e) =>
@@ -652,6 +654,7 @@ namespace DevStudio.Editor
             {
                 _kind = kind;
                 ToolTipTitle = kind ?? "";
+                ImageIndex = StudioIcons.CompletionIndex(kind);
             }
 
             public override CompareResult Compare(string fragmentText)
@@ -660,11 +663,17 @@ namespace DevStudio.Editor
                 {
                     return CompareResult.Visible;
                 }
-                if (Text.StartsWith(fragmentText, StringComparison.InvariantCultureIgnoreCase) && Text != fragmentText)
+                int dot = fragmentText.LastIndexOf('.');
+                string member = dot >= 0 ? fragmentText.Substring(dot + 1) : fragmentText;
+                if (member.Length == 0)
+                {
+                    return CompareResult.Visible;
+                }
+                if (Text.StartsWith(member, StringComparison.InvariantCultureIgnoreCase) && Text != member)
                 {
                     return CompareResult.VisibleAndSelected;
                 }
-                if (Text.ToLowerInvariant().Contains(fragmentText.ToLowerInvariant()))
+                if (Text.ToLowerInvariant().Contains(member.ToLowerInvariant()))
                 {
                     return CompareResult.Visible;
                 }
