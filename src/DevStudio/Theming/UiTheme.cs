@@ -12,6 +12,7 @@ namespace DevStudio.Theming
         public static event EventHandler ThemeChanged;
 
         private static readonly List<TabControl> _closeButtonTabs = new List<TabControl>();
+        private static readonly Dictionary<TabControl, TabBackgroundHook> _tabHooks = new Dictionary<TabControl, TabBackgroundHook>();
 
         private static EditorTheme _current = EditorTheme.Dark;
         public static EditorTheme Current
@@ -113,6 +114,21 @@ namespace DevStudio.Theming
                 {
                     tab.DrawMode = TabDrawMode.Normal;
                 }
+                TabBackgroundHook hook;
+                if (!_tabHooks.TryGetValue(tab, out hook))
+                {
+                    hook = new TabBackgroundHook(tab);
+                    _tabHooks[tab] = hook;
+                    tab.HandleCreated += (s, e) => hook.Attach();
+                    tab.HandleDestroyed += (s, e) => hook.ReleaseHandle();
+                }
+                hook.Attach();
+            }
+            else if (control is TabPage page)
+            {
+                page.UseVisualStyleBackColor = false;
+                page.BackColor = Window;
+                page.ForeColor = Text;
             }
             else if (control is ListView lv)
             {
@@ -253,6 +269,47 @@ namespace DevStudio.Theming
                     e.Graphics.DrawLine(pen, closeRect.Left + 3, closeRect.Top + 3, closeRect.Right - 3, closeRect.Bottom - 3);
                     e.Graphics.DrawLine(pen, closeRect.Right - 3, closeRect.Top + 3, closeRect.Left + 3, closeRect.Bottom - 3);
                 }
+            }
+        }
+
+        private sealed class TabBackgroundHook : NativeWindow
+        {
+            private const int WM_ERASEBKGND = 0x0014;
+
+            private readonly TabControl _tab;
+
+            public TabBackgroundHook(TabControl tab)
+            {
+                _tab = tab;
+            }
+
+            public void Attach()
+            {
+                if (_tab.IsHandleCreated && Handle == IntPtr.Zero)
+                {
+                    AssignHandle(_tab.Handle);
+                }
+            }
+
+            protected override void WndProc(ref Message m)
+            {
+                if (m.Msg == WM_ERASEBKGND && m.WParam != IntPtr.Zero)
+                {
+                    try
+                    {
+                        using (var graphics = Graphics.FromHdc(m.WParam))
+                        using (var brush = new SolidBrush(Background2))
+                        {
+                            graphics.FillRectangle(brush, _tab.ClientRectangle);
+                        }
+                    }
+                    catch
+                    {
+                    }
+                    m.Result = (IntPtr)1;
+                    return;
+                }
+                base.WndProc(ref m);
             }
         }
 

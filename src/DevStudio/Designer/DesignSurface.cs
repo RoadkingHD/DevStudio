@@ -255,6 +255,7 @@ namespace DevStudio.Designer
                 {
                     ApplyProperty(instance, property.Key, property.Value);
                 }
+                ApplyItems(instance, info);
                 if (form != null)
                 {
                     form.TopLevel = false;
@@ -298,6 +299,79 @@ namespace DevStudio.Designer
         public bool IsDesignBlocked(Control control, string propertyName)
         {
             return ReferenceEquals(control, _rootControl) && RootDesignBlocked.Contains(propertyName);
+        }
+
+        private static void ApplyItems(Control instance, ControlInfo info)
+        {
+            if (info.Items.Count == 0)
+            {
+                return;
+            }
+            try
+            {
+                var itemsProperty = instance.GetType().GetProperty("Items");
+                if (itemsProperty == null)
+                {
+                    return;
+                }
+                var collection = itemsProperty.GetValue(instance, null);
+                if (collection == null)
+                {
+                    return;
+                }
+                var addRange = collection.GetType().GetMethod("AddRange", new[] { typeof(object[]) });
+                if (addRange == null)
+                {
+                    return;
+                }
+                var values = new object[info.Items.Count];
+                for (int i = 0; i < values.Length; i++)
+                {
+                    values[i] = DesignerExpressionEvaluator.Evaluate(info.Items[i], typeof(object));
+                }
+                addRange.Invoke(collection, new object[] { values });
+            }
+            catch
+            {
+            }
+        }
+
+        public void UpdateModelItems(Control control, string[] items)
+        {
+            if (_model == null || control == null)
+            {
+                return;
+            }
+            var name = (string)control.Tag ?? "this";
+            ControlInfo info;
+            if (!_model.Controls.TryGetValue(name, out info))
+            {
+                return;
+            }
+            info.Items.Clear();
+            foreach (var item in items)
+            {
+                info.Items.Add("\"" + item.Replace("\"", "\\\"") + "\"");
+            }
+            try
+            {
+                var itemsProperty = control.GetType().GetProperty("Items");
+                var collection = itemsProperty != null ? itemsProperty.GetValue(control, null) : null;
+                var addRange = collection != null ? collection.GetType().GetMethod("AddRange", new[] { typeof(object[]) }) : null;
+                if (collection != null && addRange != null)
+                {
+                    var clear = collection.GetType().GetMethod("Clear", Type.EmptyTypes);
+                    if (clear != null)
+                    {
+                        clear.Invoke(collection, null);
+                    }
+                    addRange.Invoke(collection, new object[] { items.Cast<object>().ToArray() });
+                }
+            }
+            catch
+            {
+            }
+            ModelChanged?.Invoke();
         }
 
         private static void ApplyProperty(Control instance, string propertyName, string expression)
@@ -388,6 +462,10 @@ namespace DevStudio.Designer
                 _resizing = ResizeHandle.None;
                 control.Capture = false;
                 UpdateModelFromControl(_selected);
+                if (ReferenceEquals(_selected, _rootControl))
+                {
+                    SyncSurfaceToRoot();
+                }
                 SelectionChanged?.Invoke(_selected);
                 return;
             }
@@ -398,6 +476,15 @@ namespace DevStudio.Designer
                 UpdateModelFromControl(_selected);
                 SelectionChanged?.Invoke(_selected);
             }
+        }
+
+        private void SyncSurfaceToRoot()
+        {
+            if (_rootControl == null)
+            {
+                return;
+            }
+            Size = new Size(_rootControl.Width + 24, _rootControl.Height + 24);
         }
 
         internal void HandleHookSetCursor(Control control)
@@ -444,6 +531,7 @@ namespace DevStudio.Designer
         private sealed class ControlMouseHook : NativeWindow
         {
             private const int WM_SETCURSOR = 0x0020;
+            private const int WM_NCHITTEST = 0x0084;
             private const int WM_MOUSEMOVE = 0x0200;
             private const int WM_LBUTTONDOWN = 0x0201;
             private const int WM_LBUTTONUP = 0x0202;
@@ -470,6 +558,9 @@ namespace DevStudio.Designer
             {
                 switch (m.Msg)
                 {
+                    case WM_NCHITTEST:
+                        m.Result = (IntPtr)1;
+                        return;
                     case WM_LBUTTONDOWN:
                         _surface.HandleHookMouseDown(_control, PointFromLParam(m.LParam), 1);
                         m.Result = IntPtr.Zero;
@@ -684,7 +775,14 @@ namespace DevStudio.Designer
                 return;
             }
             info.Properties[property] = expression;
-            EnsureSurfaceFits();
+            if (ReferenceEquals(control, _rootControl) && (property == "Size" || property == "ClientSize"))
+            {
+                SyncSurfaceToRoot();
+            }
+            else
+            {
+                EnsureSurfaceFits();
+            }
             ModelChanged?.Invoke();
         }
 

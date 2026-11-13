@@ -15,6 +15,7 @@ namespace DevStudio.Designer
         public OrderedProperties Properties { get; } = new OrderedProperties();
         public OrderedProperties Events { get; } = new OrderedProperties();
         public List<string> Children { get; } = new List<string>();
+        public List<string> Items { get; } = new List<string>();
     }
 
     /// <summary>Property bag that remembers the original source expressions and their order.</summary>
@@ -255,6 +256,17 @@ namespace DevStudio.Designer
             {
                 return;
             }
+            if (methodName == "AddRange")
+            {
+                string itemsOwner;
+                List<string> elements;
+                if (TryGetItemsOwner(called, out itemsOwner) && itemsOwner != null &&
+                    model.Controls.ContainsKey(itemsOwner) && TryGetCollectionElements(invocation, out elements))
+                {
+                    model.Controls[itemsOwner].Items.AddRange(elements);
+                    return;
+                }
+            }
             if (methodName != "Add" && methodName != "AddRange")
             {
                 model.ExtraStatements.Add(statementText);
@@ -295,6 +307,50 @@ namespace DevStudio.Designer
                     }
                 }
             }
+        }
+
+        private static bool TryGetItemsOwner(MemberAccessExpressionSyntax called, out string ownerName)
+        {
+            ownerName = null;
+            var itemsAccess = called.Expression as MemberAccessExpressionSyntax;
+            if (itemsAccess == null || itemsAccess.Name.Identifier.ValueText != "Items")
+            {
+                return false;
+            }
+            ownerName = GetOwnerName(itemsAccess.Expression);
+            return ownerName != null;
+        }
+
+        private static bool TryGetCollectionElements(InvocationExpressionSyntax invocation, out List<string> elements)
+        {
+            elements = null;
+            var argument = invocation.ArgumentList.Arguments.FirstOrDefault();
+            if (argument == null)
+            {
+                return false;
+            }
+            InitializerExpressionSyntax initializer = null;
+            var objectCreation = argument.Expression as ObjectCreationExpressionSyntax;
+            if (objectCreation != null)
+            {
+                initializer = objectCreation.Initializer;
+            }
+            var arrayCreation = argument.Expression as ArrayCreationExpressionSyntax;
+            if (arrayCreation != null)
+            {
+                initializer = arrayCreation.Initializer;
+            }
+            var implicitCreation = argument.Expression as ImplicitArrayCreationExpressionSyntax;
+            if (implicitCreation != null)
+            {
+                initializer = implicitCreation.Initializer;
+            }
+            if (initializer == null)
+            {
+                return false;
+            }
+            elements = initializer.Expressions.Select(e => e.ToString()).ToList();
+            return true;
         }
 
         private static ControlInfo GetOrCreate(DesignerModel model, string name)

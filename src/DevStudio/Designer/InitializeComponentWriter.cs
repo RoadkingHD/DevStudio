@@ -160,6 +160,10 @@ namespace DevStudio.Designer
                 {
                     lines.Add("this." + control.Name + "." + property.Key + " = " + property.Value + ";");
                 }
+                if (control.Items.Count > 0)
+                {
+                    lines.Add("this." + control.Name + ".Items.AddRange(new object[] { " + string.Join(", ", control.Items) + " });");
+                }
                 foreach (var evt in control.Events.Entries)
                 {
                     lines.Add("this." + control.Name + "." + evt.Key + " += " + evt.Value + ";");

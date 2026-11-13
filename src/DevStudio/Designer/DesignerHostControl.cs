@@ -473,9 +473,29 @@ namespace DevStudio.Designer
                     {
                         continue;
                     }
+                    if (property.Name == "Items" && (_control is ComboBox || _control is ListBox))
+                    {
+                        continue;
+                    }
                     descriptors.Add(new ModelPropertyDescriptor(property, _surface, _control));
                 }
+                var info = LookupModelInfo();
+                if (info != null && (_control is ComboBox || _control is ListBox))
+                {
+                    descriptors.Add(new ItemsPropertyDescriptor(_surface, info, _control));
+                }
                 return new PropertyDescriptorCollection(descriptors.ToArray());
+            }
+
+            private ControlInfo LookupModelInfo()
+            {
+                var name = (string)_control.Tag;
+                if (name == null || _surface.Model == null)
+                {
+                    return null;
+                }
+                ControlInfo info;
+                return _surface.Model.Controls.TryGetValue(name, out info) ? info : null;
             }
 
             object ICustomTypeDescriptor.GetPropertyOwner(PropertyDescriptor pd)
@@ -554,6 +574,86 @@ namespace DevStudio.Designer
             private void PushValue()
             {
                 _surface.UpdateModelProperty(_control, Name, GetValue(null));
+            }
+        }
+
+        private sealed class ItemsPropertyDescriptor : PropertyDescriptor
+        {
+            private readonly DesignSurface _surface;
+            private readonly ControlInfo _info;
+            private readonly Control _control;
+
+            public ItemsPropertyDescriptor(DesignSurface surface, ControlInfo info, Control control)
+                : base("Items", new Attribute[] { new CategoryAttribute("Data") })
+            {
+                _surface = surface;
+                _info = info;
+                _control = control;
+            }
+
+            public override Type ComponentType
+            {
+                get { return _control.GetType(); }
+            }
+
+            public override Type PropertyType
+            {
+                get { return typeof(string[]); }
+            }
+
+            public override bool IsReadOnly
+            {
+                get { return false; }
+            }
+
+            public override object GetValue(object component)
+            {
+                var items = new string[_info.Items.Count];
+                for (int i = 0; i < items.Length; i++)
+                {
+                    var expression = _info.Items[i].Trim();
+                    if (expression.Length >= 2 && expression[0] == '"' && expression[expression.Length - 1] == '"')
+                    {
+                        items[i] = expression.Substring(1, expression.Length - 2);
+                    }
+                    else
+                    {
+                        items[i] = expression;
+                    }
+                }
+                return items;
+            }
+
+            public override void SetValue(object component, object value)
+            {
+                var strings = value as string[];
+                if (strings == null)
+                {
+                    var enumerable = value as System.Collections.IEnumerable;
+                    if (enumerable != null)
+                    {
+                        strings = enumerable.Cast<object>().Where(o => o != null).Select(o => o.ToString()).ToArray();
+                    }
+                }
+                if (strings == null)
+                {
+                    return;
+                }
+                _surface.UpdateModelItems(_control, strings);
+            }
+
+            public override bool CanResetValue(object component)
+            {
+                return false;
+            }
+
+            public override void ResetValue(object component)
+            {
+            }
+
+            public override bool ShouldSerializeValue(object component)
+            {
+                return _info.Items.Count > 0;
             }
         }
     }
