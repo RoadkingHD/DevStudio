@@ -25,6 +25,15 @@ namespace DevStudio.Build
             @"^(?<tool>.*?(?:mingw32-make|make|collect2|\bld|cc1plus|cc1|as)(?:\.exe)?)\s*:?\s*(?<message>.*)$",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+        /// <summary>Matches GCC source excerpts and caret markers ("9 |     Nisse", " | ^~~~~")
+        /// that accompany diagnostics and must not become Error List entries.</summary>
+        private static readonly Regex GccExcerptRegex = new Regex(
+            @"^\s*\d+\s*\||^\s*\|\s*[\^\~]", RegexOptions.Compiled);
+
+        /// <summary>Matches object files in linker diagnostics ("main.o:main.cpp:(.text+0x0): ...").</summary>
+        private static readonly Regex GccLinkerFileRegex = new Regex(
+            @"^(?<file>[^:\s]+\.(?:o|obj|a|lib))", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
         private readonly Action<string> _log;
         public string CompilerPath { get; set; }
 
@@ -182,65 +191,18 @@ namespace DevStudio.Build
             {
                 using (var process = Process.Start(startInfo))
                 {
-                    var stdout = process.StandardOutput.ReadToEnd();
-                    var stderr = process.StandardError.ReadToEnd();
+                    // Read both streams concurrently: sequential ReadToEnd calls can deadlock
+                    // when the child process fills the pipe buffer of the stream read second.
+                    var stdoutTask = process.StandardOutput.ReadToEndAsync();
+                    var stderrTask = process.StandardError.ReadToEndAsync();
                     process.WaitForExit();
 
-                    foreach (var line in SplitLines(stdout))
-                    {
-                        _log("  " + line);
-                    }
-                    foreach (var line in SplitLines(stderr))
-                    {
-                        _log("  " + line);
-                        var match = GccErrorRegex.Match(line);
-                        var hasColumn = match.Success;
-                        if (!match.Success)
-                        {
-                            match = GccShortErrorRegex.Match(line);
-                        }
-                        if (match.Success)
-                        {
-                            var severity = match.Groups["severity"].Value;
-                            result.Diagnostics.Add(new DiagnosticItem
-                            {
-                                Severity = severity.Contains("error") ? DiagnosticSeverityEx.Error
-                                    : severity == "warning" ? DiagnosticSeverityEx.Warning
-                                    : DiagnosticSeverityEx.Message,
-                                Code = "gcc",
-                                Message = match.Groups["message"].Value,
-                                File = match.Groups["file"].Value,
-                                Line = int.Parse(match.Groups["line"].Value),
-                                Column = hasColumn ? int.Parse(match.Groups["col"].Value) : 1,
-                                Project = project.Name
-                            });
-                            continue;
-                        }
-                        if (line.IndexOf("undefined reference", StringComparison.OrdinalIgnoreCase) >= 0
-                            || line.IndexOf("cannot find", StringComparison.OrdinalIgnoreCase) >= 0
-                            || line.IndexOf("multiple definition", StringComparison.OrdinalIgnoreCase) >= 0)
-                        {
-                            result.Diagnostics.Add(new DiagnosticItem
-                            {
-                                Severity = DiagnosticSeverityEx.Error,
-                                Code = "ld",
-                                Message = line,
-                                Project = project.Name
-                            });
-                            continue;
-                        }
-                        var toolMatch = GccToolErrorRegex.Match(line);
-                        if (toolMatch.Success && (line.Contains("***") || line.IndexOf("error", StringComparison.OrdinalIgnoreCase) >= 0))
-                        {
-                            result.Diagnostics.Add(new DiagnosticItem
-                            {
-                                Severity = DiagnosticSeverityEx.Error,
-                                Code = "gcc",
-                                Message = line,
-                                Project = project.Name
-                            });
-                        }
-                    }
+                    // Diagnostics are scanned on BOTH streams: some toolchain wrappers and
+                    // shims redirect the compiler's stderr into stdout, which previously made
+                    // every real error invisible to the Error List.
+                    var seen = new HashSet<string>(StringComparer.Ordinal);
+                    ScanCompilerOutput(SplitLines(stdoutTask.Result), project, result, seen);
+                    ScanCompilerOutput(SplitLines(stderrTask.Result), project, result, seen);
 
                     result.Success = process.ExitCode == 0;
                 }
@@ -291,6 +253,83 @@ namespace DevStudio.Build
                 process.WaitForExit();
                 outputLine("Program exited with code " + process.ExitCode + ".");
             });
+        }
+
+        /// <summary>Parses compiler/linker output lines into Error List diagnostics.
+        /// Duplicate entries (same stream content scanned twice) are suppressed via <paramref name="seen"/>.</summary>
+        private void ScanCompilerOutput(
+            IEnumerable<string> lines, ProjectBase project, BuildResult result, HashSet<string> seen)
+        {
+            foreach (var rawLine in lines)
+            {
+                _log("  " + rawLine);
+                var line = rawLine.TrimEnd('\r', ' ', '\t');
+                if (line.Length == 0 || GccExcerptRegex.IsMatch(line))
+                {
+                    continue;
+                }
+
+                var match = GccErrorRegex.Match(line);
+                var hasColumn = match.Success;
+                if (!match.Success)
+                {
+                    match = GccShortErrorRegex.Match(line);
+                }
+                if (match.Success)
+                {
+                    var severity = match.Groups["severity"].Value;
+                    AddDiagnostic(result, seen, new DiagnosticItem
+                    {
+                        Severity = severity.Contains("error") ? DiagnosticSeverityEx.Error
+                            : severity == "warning" ? DiagnosticSeverityEx.Warning
+                            : DiagnosticSeverityEx.Message,
+                        Code = "gcc",
+                        Message = match.Groups["message"].Value,
+                        File = match.Groups["file"].Value,
+                        Line = int.Parse(match.Groups["line"].Value, System.Globalization.CultureInfo.InvariantCulture),
+                        Column = hasColumn ? int.Parse(match.Groups["col"].Value, System.Globalization.CultureInfo.InvariantCulture) : 1,
+                        Project = project.Name
+                    });
+                    continue;
+                }
+
+                if (line.IndexOf("undefined reference", StringComparison.OrdinalIgnoreCase) >= 0
+                    || line.IndexOf("cannot find", StringComparison.OrdinalIgnoreCase) >= 0
+                    || line.IndexOf("multiple definition", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    var linkerFile = GccLinkerFileRegex.Match(line);
+                    AddDiagnostic(result, seen, new DiagnosticItem
+                    {
+                        Severity = DiagnosticSeverityEx.Error,
+                        Code = "ld",
+                        Message = line,
+                        File = linkerFile.Success ? linkerFile.Groups["file"].Value : null,
+                        Project = project.Name
+                    });
+                    continue;
+                }
+
+                var toolMatch = GccToolErrorRegex.Match(line);
+                if (toolMatch.Success && (line.Contains("***") || line.IndexOf("error", StringComparison.OrdinalIgnoreCase) >= 0))
+                {
+                    AddDiagnostic(result, seen, new DiagnosticItem
+                    {
+                        Severity = DiagnosticSeverityEx.Error,
+                        Code = "gcc",
+                        Message = line,
+                        Project = project.Name
+                    });
+                }
+            }
+        }
+
+        private static void AddDiagnostic(BuildResult result, HashSet<string> seen, DiagnosticItem item)
+        {
+            var key = item.Severity + "|" + item.File + "|" + item.Line + "|" + item.Column + "|" + item.Message;
+            if (seen.Add(key))
+            {
+                result.Diagnostics.Add(item);
+            }
         }
 
         private static IEnumerable<string> SplitLines(string text)
