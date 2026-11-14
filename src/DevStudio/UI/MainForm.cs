@@ -1002,7 +1002,7 @@ namespace DevStudio.UI
                             proxyExports = new List<string>();
                             outputPanel.AppendLine("Warning: could not read exports from " + fileDialog.FileName + ": " + ex.Message);
                         }
-                        proxyTarget = Path.GetFileNameWithoutExtension(fileDialog.FileName);
+                        proxyTarget = fileDialog.FileName;
                         outputPanel.AppendLine("Found " + proxyExports.Count + " exported functions in " + Path.GetFileName(fileDialog.FileName));
                     }
                 }
@@ -1527,12 +1527,18 @@ namespace DevStudio.UI
             "executeInfo.nShow = SW_SHOW;\r\n" +
             "ShellExecuteEx(&executeInfo);";
 
-        private static string NewCppProxyTemplate(string moduleName, List<string> exports)
+        private static string NewCppProxyTemplate(string targetDllPath, List<string> exports)
         {
             var nl = Environment.NewLine;
+            var moduleName = Path.GetFileNameWithoutExtension(targetDllPath);
+            // Forwarding target as full path without extension, forward slashes
+            // (valid inside the linker's -export forwarding directive).
+            var absoluteTarget = Path.IsPathRooted(targetDllPath) ? targetDllPath : Path.GetFullPath(targetDllPath);
+            var fullTarget = Path.ChangeExtension(absoluteTarget, null).Replace("\\", "/");
             var sb = new StringBuilder();
             sb.Append("// Proxy DLL - forwards all exported functions to " + moduleName + ".dll." + nl);
-            sb.Append("// Build with the MSVC linker for /export forwarding; MinGW ignores #pragma comment." + nl);
+            sb.Append("// Exports are forwarded via .drectve linker directives embedded with inline asm," + nl);
+            sb.Append("// which work with both the MinGW ld and the MSVC linker." + nl);
             sb.Append("#include <windows.h>" + nl);
             sb.Append(nl);
             var identifierRegex = new Regex("^[A-Za-z_][A-Za-z0-9_]*$");
@@ -1542,7 +1548,7 @@ namespace DevStudio.UI
                 {
                     continue;
                 }
-                sb.Append("#pragma comment(linker, \"/export:" + export + "=" + moduleName + "." + export + "\")" + nl);
+                sb.AppendLine($@"asm ("".section .drectve\n\t.ascii \"" -export:{export}={fullTarget}.{export}\"""");");
             }
             sb.Append(nl);
             sb.Append("BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)" + nl);
