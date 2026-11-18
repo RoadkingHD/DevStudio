@@ -41,6 +41,7 @@ namespace DevStudio.UI
         private readonly CSharpBuildService _csharpBuilder;
         private readonly CppBuildService _cppBuilder;
         private bool _building;
+        private bool _syncingOutputKind;
         private bool _minimapVisible = true;
 
         public MainForm(string[] args)
@@ -738,6 +739,7 @@ namespace DevStudio.UI
             bool stopped = _debugger.IsStopped;
             bool canBuild = !_building && !running;
             bool debuggingSupported = ActiveProject == null || ActiveProject.Language != DevLanguage.Cpp;
+            SyncOutputKindCombo();
             stopButton.Enabled = stopDebugMenu.Enabled = running;
             stepOverButton.Enabled = stepOverMenu.Enabled = stopped;
             stepIntoButton.Enabled = stepIntoMenu.Enabled = stopped;
@@ -1223,8 +1225,9 @@ namespace DevStudio.UI
             solutionExplorer.LoadProject(project);
             if (Path.GetExtension(path).Equals(".cs", StringComparison.OrdinalIgnoreCase))
             {
-                WorkspaceManager.Instance.SetSingleFile(path);
+                WorkspaceManager.Instance.SetSingleFile(path, project.OutputKind);
             }
+            UpdateDebugUi();
         }
 
         private void AddExistingFile(ProjectBase project)
@@ -1420,6 +1423,89 @@ namespace DevStudio.UI
             foreach (var tab in _tabs)
             {
                 tab.Editor.ShowMinimap(_minimapVisible);
+            }
+        }
+
+        private void OutputKindChanged(object sender, EventArgs e)
+        {
+            if (_syncingOutputKind)
+            {
+                return;
+            }
+            OutputKindEx kind;
+            if (!TryParseOutputKind(outputKindCombo.SelectedItem as string, out kind))
+            {
+                return;
+            }
+            var project = ActiveProject;
+            if (project == null)
+            {
+                statusLabel.Text = "No project loaded - output kind is remembered for the next build.";
+                return;
+            }
+            if (project.OutputKind == kind)
+            {
+                statusLabel.Text = "Output kind: " + OutputKindLabel(kind);
+                return;
+            }
+            project.OutputKind = kind;
+            if (project is CSharpProject)
+            {
+                WorkspaceManager.Instance.UpdateCompilationOptions();
+            }
+            statusLabel.Text = "Output kind set to " + OutputKindLabel(kind);
+        }
+
+        private void SyncOutputKindCombo()
+        {
+            var project = ActiveProject;
+            int index = project == null ? 0 : (int)project.OutputKind;
+            if (outputKindCombo.SelectedIndex != index)
+            {
+                _syncingOutputKind = true;
+                outputKindCombo.SelectedIndex = index;
+                _syncingOutputKind = false;
+            }
+        }
+
+        private static string OutputKindLabel(OutputKindEx kind)
+        {
+            if (kind == OutputKindEx.WindowsApplication)
+            {
+                return "Windows Application";
+            }
+            if (kind == OutputKindEx.Library)
+            {
+                return "Class Library";
+            }
+            return "Console Application";
+        }
+
+        private static bool TryParseOutputKind(string text, out OutputKindEx kind)
+        {
+            kind = OutputKindEx.ConsoleApplication;
+            if (string.IsNullOrEmpty(text))
+            {
+                return false;
+            }
+            // Accept the plain enum name (e.g. "Library") and the friendly label (e.g. "Class Library").
+            if (text.IndexOf(' ') < 0)
+            {
+                return Enum.TryParse(text, true, out kind);
+            }
+            switch (text.Trim())
+            {
+                case "Console Application":
+                    kind = OutputKindEx.ConsoleApplication;
+                    return true;
+                case "Windows Application":
+                    kind = OutputKindEx.WindowsApplication;
+                    return true;
+                case "Class Library":
+                    kind = OutputKindEx.Library;
+                    return true;
+                default:
+                    return Enum.TryParse(text.Replace(" ", string.Empty), true, out kind);
             }
         }
 

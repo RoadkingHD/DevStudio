@@ -55,6 +55,7 @@ namespace DevStudio.UI
         private System.Windows.Forms.ToolStripButton stepOutButton;
         private System.Windows.Forms.ToolStripComboBox platformCombo;
         private System.Windows.Forms.ToolStripComboBox configCombo;
+        private System.Windows.Forms.ToolStripComboBox outputKindCombo;
 
         private Panels.OutputPanel outputPanel;
         private Panels.ErrorListPanel errorListPanel;
@@ -131,6 +132,7 @@ namespace DevStudio.UI
             this.stepOutButton = new System.Windows.Forms.ToolStripButton();
             this.platformCombo = new System.Windows.Forms.ToolStripComboBox();
             this.configCombo = new System.Windows.Forms.ToolStripComboBox();
+            this.outputKindCombo = new System.Windows.Forms.ToolStripComboBox();
 
             this.menuStrip.SuspendLayout();
             this.toolStrip.SuspendLayout();
@@ -386,7 +388,8 @@ namespace DevStudio.UI
             this.stepOutButton,
             new System.Windows.Forms.ToolStripSeparator(),
             this.configCombo,
-            this.platformCombo});
+            this.platformCombo,
+            this.outputKindCombo});
             this.toolStrip.Location = new System.Drawing.Point(0, 24);
             this.toolStrip.Name = "toolStrip";
             this.toolStrip.Size = new System.Drawing.Size(1280, 25);
@@ -471,6 +474,15 @@ namespace DevStudio.UI
             this.platformCombo.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.platformCombo.ToolTipText = "Platform";
             this.platformCombo.SelectedIndexChanged += new System.EventHandler(this.PlatformChanged);
+            //
+            // outputKindCombo
+            //
+            this.outputKindCombo.Name = "outputKindCombo";
+            this.outputKindCombo.Items.AddRange(new object[] { "Console Application", "Windows Application", "Class Library" });
+            this.outputKindCombo.SelectedIndex = 0;
+            this.outputKindCombo.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.outputKindCombo.ToolTipText = "Output Kind (used when compiling single files)";
+            this.outputKindCombo.SelectedIndexChanged += new System.EventHandler(this.OutputKindChanged);
             //
             // mainSplit
             //

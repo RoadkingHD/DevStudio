@@ -50,9 +50,7 @@ namespace DevStudio.Services
 
                 var platform = ParsePlatform(project.Platform);
                 _compilationOptions = new CSharpCompilationOptions(
-                    project.OutputKind == OutputKindEx.Library ? OutputKind.DynamicallyLinkedLibrary :
-                    project.OutputKind == OutputKindEx.WindowsApplication ? OutputKind.WindowsApplication :
-                    OutputKind.ConsoleApplication)
+                    MapOutputKind(project.OutputKind))
                 .WithPlatform(platform).WithAllowUnsafe(true)
                 .WithOptimizationLevel(OptimizationLevel.Debug);
 
@@ -80,7 +78,7 @@ namespace DevStudio.Services
             }
         }
 
-        public void SetSingleFile(string filePath)
+        public void SetSingleFile(string filePath, OutputKindEx outputKind = OutputKindEx.ConsoleApplication)
         {
             lock (_gate)
             {
@@ -95,7 +93,7 @@ namespace DevStudio.Services
                     Path.GetFileNameWithoutExtension(filePath),
                     Path.GetFileNameWithoutExtension(filePath),
                     LanguageNames.CSharp,
-                    compilationOptions: new CSharpCompilationOptions(OutputKind.ConsoleApplication).WithAllowUnsafe(true),
+                    compilationOptions: new CSharpCompilationOptions(MapOutputKind(outputKind)).WithAllowUnsafe(true),
                     parseOptions: new CSharpParseOptions(LanguageVersion.CSharp7_3),
                     metadataReferences: GetFrameworkReferences());
 
@@ -189,10 +187,25 @@ namespace DevStudio.Services
             }
             lock (_gate)
             {
-                _compilationOptions = _compilationOptions.WithPlatform(ParsePlatform(_project.Platform));
+                _compilationOptions = _compilationOptions
+                    .WithOutputKind(MapOutputKind(_project.OutputKind))
+                    .WithPlatform(ParsePlatform(_project.Platform));
                 var solution = _workspace.CurrentSolution.WithProjectCompilationOptions(_projectId, _compilationOptions);
                 _workspace.TryApplyChanges(solution);
             }
+        }
+
+        private static OutputKind MapOutputKind(OutputKindEx kind)
+        {
+            if (kind == OutputKindEx.Library)
+            {
+                return OutputKind.DynamicallyLinkedLibrary;
+            }
+            if (kind == OutputKindEx.WindowsApplication)
+            {
+                return OutputKind.WindowsApplication;
+            }
+            return OutputKind.ConsoleApplication;
         }
 
         private static Microsoft.CodeAnalysis.Platform ParsePlatform(string platform)
